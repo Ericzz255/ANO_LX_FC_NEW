@@ -6,7 +6,7 @@
 #define ROWS 7
 #define COLS 9
 #define MAX_CELLS (ROWS * COLS)
-#define MAX_PATH_LENGTH 1000
+#define MAX_PATH_LENGTH 150
 #define BARRIER_COUNT 3
 #define MAX_PATH_POINTS 100
 #define GRID_SIZE_CM 50

@@ -3,7 +3,7 @@
  * @brief   程控任务与路径规划主文件
  * @details 本文件为 "260506 无人机目标检测" 任务的核心逻辑，包含：
  *          1) 水平位置 PID 控制器（当前未使用，保留备用）
- *          2) 网格地图路径规划：BFS 最短路径 + 最近邻 TSP 遍历
+ *          2) 网格地图路径规划：BFS 最短路径 + 蛇形覆盖遍历(替代TSP)
  *          3) 一键程控任务状态机：由遥控器 CH6 高位触发，自动完成
  *             起飞 -> 路径规划 -> 逐格移动（含停留检测）-> 降落的完整流程。
  *
@@ -87,12 +87,12 @@
  *   - col（横向索引）：增大 = 向左（A9→A1）
  * 起始点固定为 (0, 0)，即右下角 A9/B1。
  *
- * 障碍物（禁飞区）：已硬编码为 (3,5), (4,5), (5,5)。
+ * 障碍物（禁飞区）：在 barriers[] 数组中硬编码，默认 A7/A8/A9, B3。
  *
  * 算法流程：
  *   1. generate_barriers()    : 初始化网格，标记障碍物为不可通行(0)
  *   2. collect_accessible_cells(): 收集所有可通行格子的坐标
- *   3. nearest_neighbor_tsp() : 从 (0,0) 出发，用最近邻策略决定遍历顺序
+ *   3. snake_tsp()             : 用蛇形扫描策略生成覆盖顺序(替代TSP)
  *   4. build_full_path()      : 对每一对相邻访问点，用 BFS 找出最短路径并拼接
  *   5. real_routine()         : 将网格坐标转换为实际厘米坐标
  *
@@ -134,9 +134,9 @@ int grid[ROWS][COLS];
  *         当前障碍物在 A6 这一列、B4~B6 这一排，形成一堵竖墙。
  */
 Point barriers[BARRIER_COUNT] = {
-    {6, 4},
-    {6, 5},
-    {6, 6}
+    {7, 3},
+    {8, 3},
+    {9, 3}
 };
 
 /**
@@ -157,6 +157,15 @@ int accessible_count = 0;
  */
 Point final_path[MAX_PATH_LENGTH];
 int final_path_length = 0;
+
+/**
+ * @brief  路径规划全局缓冲区（static避免栈溢出）
+ * @note   STM32F407任务栈通常只有1-2KB，以下数组若放局部变量会导致栈溢出复位。
+ *         改用全局静态存储区，由 snake_tsp / snake_tsp_col / build_full_path 复用。
+ */
+static Point g_order_row[MAX_CELLS * 2];    /* 行扫描访问顺序 */
+static Point g_order_col[MAX_CELLS * 2];    /* 列扫描访问顺序 */
+static Point g_seg_buffer[MAX_PATH_LENGTH]; /* BFS路径拼接缓冲区（build_full_path + run_path_planner复用） */
 
 /**
  * @brief  四邻域搜索方向表
@@ -268,9 +277,12 @@ int is_valid(int row, int col) {
  *         如果走到的格子数明显小于总空地数，说明地图被切断了。
  */
 int check_connectivity() {
-    int visited[ROWS][COLS] = {0};   /* visited[][] 记录每个格子是否被 BFS 访问过，
-                                       初始全 0，访问过置 1，防止重复计数和死循环 */
-    Queue q;                         /* 声明一个队列，用于存放待探索的节点 */
+    static int visited[ROWS][COLS];  /* static避免栈溢出，全局存储 */
+    static Queue q;
+    int r, c;
+    for (r = 0; r < ROWS; r++)      /* 手动清零 */
+        for (c = 0; c < COLS; c++)
+            visited[r][c] = 0;
     init_queue(&q);                  /* 初始化队列，front=rear=0 */
     Point start = {0, 0};            /* 起点设为右下角 A9/B1，对应 grid 索引 (0,0) */
     enqueue(&q, start);              /* 把起点放入队列，作为 BFS 的第一个探索对象 */
@@ -366,11 +378,13 @@ int manhattan_distance(Point a, Point b) {
  *         parent[][][] 记录每个格子的"爸爸"是谁，方便最后倒推路径。
  */
 int find_shortest_path(Point start, Point end, Point path[], int max_len) {
-    int visited[ROWS][COLS] = {0};   /* 标记每个格子是否已入队，防止重复处理和死循环 */
-    int parent[ROWS][COLS][2];       /* parent[r][c][0] = 该格子的前驱行号，
-                                       parent[r][c][1] = 该格子的前驱列号。
-                                       通过不断查"爸爸"，可以从终点倒推回起点。 */
-    Queue q;                         /* 申请一个队列 */
+    static int visited[ROWS][COLS];  /* static避免栈溢出，全局存储 */
+    static int parent[ROWS][COLS][2];
+    static Queue q;
+    int r, c;
+    for (r = 0; r < ROWS; r++)      /* 手动清零 */
+        for (c = 0; c < COLS; c++)
+            visited[r][c] = 0;
     init_queue(&q);                  /* 初始化 */
     enqueue(&q, start);              /* 起点入队 */
     visited[start.row][start.col] = 1;  /* 标记起点已访问 */
@@ -423,52 +437,135 @@ int find_shortest_path(Point start, Point end, Point path[], int max_len) {
 }
 
 /**
- * @brief  最近邻 TSP（旅行商问题）近似求解
+ * @brief  通用蛇形 TSP（替代最近邻 TSP）
  * @param  order  输出数组，存放计算出的访问顺序
- * @note   TSP 问题是"从起点出发，访问所有点，怎么走路最短"。
- *         精确求解 TSP 非常复杂（NP 难问题），这里用"最近邻"贪心策略近似：
- *           每次从当前位置出发，找离得最近的、还没去过的格子，走过去；
- *           重复直到所有格子都访问过。
- *         缺点：不一定是最优解，但计算快（O(N^2)），适合小地图（N<=63）。
- *         起始点固定为 (0,0)，即右下角 A9/B1。
+ * @return order 数组的有效长度
+ * @note   分析每行可达段，按蛇形方向交替输出格子坐标。
+ *         偶数行: A9->A1 (col递增), 奇数行: A1->A9 (col递减)。
+ *         然后由 build_full_path() 用 BFS 自动拼接行间路径（含绕行）。
+ *         适应任意连续三格禁飞区配置。
  */
-void nearest_neighbor_tsp(Point order[]) {
-    int visited[MAX_CELLS] = {0};    /* visited[i]=1 表示 accessible_cells[i] 已经被访问过 */
-    Point cur = {0, 0};              /* cur 记录"当前所在位置"，初始在起点 (0,0) */
-    int count = 0;                   /* count 记录已放入 order 的格子数 */
+int snake_tsp(Point order[]) {
+    int idx = 0;
+    int r, c;
+    int seg_start, seg_end;
+    int in_seg;
 
-    int start_idx = -1;              /* start_idx：起点在 accessible_cells 中的索引 */
-    int i;
-    /* 先在 accessible_cells 里找到起点 (0,0) 的位置 */
-    for (i = 0; i < accessible_count; i++)
-        if (accessible_cells[i].row == 0 && accessible_cells[i].col == 0)
-            { start_idx = i; break; }
+    for (r = 0; r < ROWS; r++) {
+        /*--- 收集本行的可达段起止列 ---*/
+        /* 方案：遍历本行所有列，收集连续可达区域 */
+        int seg_starts[3];   /* 最多3个段(2个障碍物可分割出3段) */
+        int seg_ends[3];
+        int seg_count = 0;
+        int cur_start = -1;
 
-    /* 如果找到了，把起点放入 order，并标记为已访问 */
-    if (start_idx != -1) {
-        order[count++] = cur;
-        visited[start_idx] = 1;
-    }
-
-    /* 主循环：每次找一个最近的未访问格子 */
-    while (count < accessible_count) {
-        int nearest_idx = -1, min_dist = INT_MAX;  /* nearest_idx: 最近格子的索引；min_dist: 当前最小距离 */
-        for (i = 0; i < accessible_count; i++) {
-            if (!visited[i]) {       /* 只看还没去过的格子 */
-                int dist = manhattan_distance(cur, accessible_cells[i]);  /* 算距离 */
-                if (dist < min_dist) {  /* 如果比之前记录的更近 */
-                    min_dist = dist;    /* 更新最小距离 */
-                    nearest_idx = i;    /* 更新最近格子索引 */
+        for (c = 0; c < COLS; c++) {
+            if (grid[r][c] == 1) {
+                if (cur_start == -1) {
+                    cur_start = c;  /* 新段开始 */
+                }
+            } else {
+                if (cur_start != -1) {
+                    seg_starts[seg_count] = cur_start;
+                    seg_ends[seg_count] = c - 1;
+                    seg_count++;
+                    cur_start = -1;  /* 段结束 */
                 }
             }
         }
-        if (nearest_idx == -1) break;  /* 保险：如果找不到（理论上不会发生），跳出循环 */
-        cur = accessible_cells[nearest_idx];  /* 移动到最近格子 */
-        order[count++] = cur;          /* 把它加入访问顺序 */
-        visited[nearest_idx] = 1;      /* 标记为已访问 */
+        /* 处理行尾未闭合的段 */
+        if (cur_start != -1) {
+            seg_starts[seg_count] = cur_start;
+            seg_ends[seg_count] = COLS - 1;
+            seg_count++;
+        }
+
+        if (seg_count == 0) {
+            continue;  /* 本行全被阻挡，跳过 */
+        }
+
+        /*--- 按蛇形方向输出本段格子 ---*/
+        if (r % 2 == 0) {
+            /* 偶数行: A9->A1 方向 (col递增) */
+            for (int s = 0; s < seg_count; s++) {
+                for (c = seg_starts[s]; c <= seg_ends[s]; c++) {
+                    order[idx++] = (Point){r, c};
+                }
+            }
+        } else {
+            /* 奇数行: A1->A9 方向 (col递减) */
+            for (int s = seg_count - 1; s >= 0; s--) {
+                for (c = seg_ends[s]; c >= seg_starts[s]; c--) {
+                    order[idx++] = (Point){r, c};
+                }
+            }
+        }
     }
+
+    return idx;
 }
 
+
+/**
+ * @brief  列扫描蛇形 TSP（snake_tsp 的列版本）
+ * @param  order  输出数组，存放列扫描访问顺序
+ * @return order 数组有效长度
+ * @note   按列扫描，偶数列从上到下(row递增)，奇数列从下到上(row递减)。
+ *         禁飞区为垂直排列时，列扫描路径通常更短。
+ */
+int snake_tsp_col(Point order[]) {
+    int idx = 0;
+    int r, c;
+
+    for (c = 0; c < COLS; c++) {
+        /*--- 收集本列可达段起止行 ---*/
+        int seg_starts[3];
+        int seg_ends[3];
+        int seg_count = 0;
+        int cur_start = -1;
+
+        for (r = 0; r < ROWS; r++) {
+            if (grid[r][c] == 1) {
+                if (cur_start == -1) {
+                    cur_start = r;
+                }
+            } else {
+                if (cur_start != -1) {
+                    seg_starts[seg_count] = cur_start;
+                    seg_ends[seg_count] = r - 1;
+                    seg_count++;
+                    cur_start = -1;
+                }
+            }
+        }
+        if (cur_start != -1) {
+            seg_starts[seg_count] = cur_start;
+            seg_ends[seg_count] = ROWS - 1;
+            seg_count++;
+        }
+
+        if (seg_count == 0) {
+            continue;
+        }
+
+        /*--- 偶数列: 从上到下(row递增), 奇数列: 从下到上(row递减) ---*/
+        if (c % 2 == 0) {
+            for (int s = 0; s < seg_count; s++) {
+                for (r = seg_starts[s]; r <= seg_ends[s]; r++) {
+                    order[idx++] = (Point){r, c};
+                }
+            }
+        } else {
+            for (int s = seg_count - 1; s >= 0; s--) {
+                for (r = seg_ends[s]; r >= seg_starts[s]; r--) {
+                    order[idx++] = (Point){r, c};
+                }
+            }
+        }
+    }
+
+    return idx;
+}
 /**
  * @brief  将 TSP 访问顺序拼接为完整逐格路径
  * @param  order  TSP 计算出的访问顺序数组
@@ -491,13 +588,12 @@ void build_full_path(Point order[], int count) {
     for (i = 0; i < count - 1; i++) {  /* 两两一对，共 count-1 段 */
         Point start = order[i];      /* 当前段的起点 */
         Point end = order[i + 1];    /* 当前段的终点 */
-        Point seg[MAX_PATH_LENGTH];  /* 临时数组，存放当前段的 BFS 路径 */
-        int seg_len = find_shortest_path(start, end, seg, MAX_PATH_LENGTH);  /* 调用 BFS */
+        int seg_len = find_shortest_path(start, end, g_seg_buffer, MAX_PATH_LENGTH);  /* 调用 BFS */
         int j;
         /* 把当前段拼接到 final_path 后面。
            i==0 时保留全部（包含起点）；i>0 时跳过 seg[0]（重复节点） */
         for (j = (i == 0 ? 0 : 1); j < seg_len; j++) {
-            final_path[final_path_length++] = seg[j];
+            final_path[final_path_length++] = g_seg_buffer[j];
         }
     }
 }
@@ -526,18 +622,37 @@ void real_routine()
  * @note   调用顺序（不能乱）：
  *   1. generate_barriers()       : 根据 A/B 障碍物坐标初始化网格
  *   2. collect_accessible_cells(): 收集所有空地
- *   3. nearest_neighbor_tsp()    : 用最近邻策略决定遍历顺序
+ *   3. snake_tsp()     : 用蛇形扫描策略生成覆盖顺序
  *   4. build_full_path()         : 用 BFS 把相邻点之间的最短路径拼起来
  *   5. real_routine()            : 转成厘米坐标（调试用）
  *
  *   执行完后，final_path[] 里就是飞机要逐格经过的完整路径。
  */
 void run_path_planner(void) {
+    int count_row, count_col;
+    int len_row, len_col;
+
     generate_barriers();             /* 步骤 1：建图（标记障碍物） */
     collect_accessible_cells();      /* 步骤 2：收集空地 */
-    Point visit_order[MAX_CELLS];    /* 临时数组，存 TSP 访问顺序 */
-    nearest_neighbor_tsp(visit_order);  /* 步骤 3：TSP 决定顺序 */
-    build_full_path(visit_order, accessible_count);  /* 步骤 4：拼接完整路径 */
+
+    /*--- 步骤 3：分别生成行扫描和列扫描的访问顺序（使用全局缓冲区） ---*/
+    count_row = snake_tsp(g_order_row);      /* 行扫描 */
+    count_col = snake_tsp_col(g_order_col);  /* 列扫描 */
+
+    /*--- 步骤 4：分别拼接，比较长度，选更优的 ---*/
+    build_full_path(g_order_row, count_row);
+    len_row = final_path_length;
+
+    build_full_path(g_order_col, count_col);
+    len_col = final_path_length;     /* 注意：此时 final_path 已被列扫描结果覆盖 */
+
+    if (len_col < len_row) {
+        /* 列扫描更优，final_path 已经是列结果，无需额外操作 */
+    } else {
+        /* 行扫描更优或相等，重新计算一次行扫描结果覆盖 final_path */
+        build_full_path(g_order_row, count_row);
+    }
+
     real_routine();                  /* 步骤 5：厘米坐标转换 */
 }
 
