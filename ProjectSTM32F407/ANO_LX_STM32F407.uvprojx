@@ -465,6 +465,16 @@
               <FileType>5</FileType>
               <FilePath>..\FcSrc\LX_FC_State.h</FilePath>
             </File>
+            <File>
+              <FileName>Path_Planning.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\FcSrc\Path_Planning.c</FilePath>
+            </File>
+            <File>
+              <FileName>Path_Planning.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\FcSrc\Path_Planning.h</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>

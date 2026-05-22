@@ -18,7 +18,7 @@
 /* 一帧数据接收完成标志（由 Pi_DataAnl 置位，由 Pi_GetData_Flag 清零） */
 static u8 g_Pi_dataAnlScs_flag = RESET;
 /* 接收缓存区，大小需 >= PI_VALID_BYTE_LENGTH */
-static u8 g_Pi_val_data[20];
+static u8 g_Pi_val_data[50];
 
 /**
  * @brief 树莓派定位数据逐字节解析（状态机）

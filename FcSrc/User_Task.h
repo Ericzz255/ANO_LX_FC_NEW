@@ -3,12 +3,6 @@
 
 #include "SysConfig.h"
 
-#define ROWS 7
-#define COLS 9
-#define MAX_CELLS (ROWS * COLS)
-#define MAX_PATH_LENGTH 150
-#define BARRIER_COUNT 3
-#define MAX_PATH_POINTS 100
 #define GRID_SIZE_CM 50
 
 typedef struct {
@@ -19,9 +13,6 @@ typedef struct {
 typedef struct {
     int row, col;
 } Point;
-
-extern PathPoint path_points[MAX_PATH_POINTS];
-extern uint8_t path_len_routine;
 
 extern s16 now_x;
 extern s16 now_y;
