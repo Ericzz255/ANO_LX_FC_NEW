@@ -145,7 +145,7 @@ Point barriers[BARRIER_COUNT] = {
  *         方便后续 TSP 算法逐个决定访问顺序。
  *         accessible_count 记录当前实际存了多少个格子。
  */
-Point accessible_cells[MAX_CELLS];
+static Point accessible_cells[MAX_CELLS];
 int accessible_count = 0;
 
 /**
@@ -155,7 +155,7 @@ int accessible_count = 0;
  *         数组索引 i 和 i+1 之间一定只相差一格（上下左右相邻）。
  *         final_path_length 记录路径总长度。
  */
-Point final_path[MAX_PATH_LENGTH];
+static Point final_path[MAX_PATH_LENGTH];
 int final_path_length = 0;
 
 /**
@@ -177,7 +177,7 @@ static Point g_seg_buffer[MAX_PATH_LENGTH]; /* BFS路径拼接缓冲区（build_
  *           {-1, 0} : row -1，col 不变 = 向下/后退
  *         顺序无所谓，只要四个方向都覆盖到就行。
  */
-int directions[4][2] = {{0, 1}, {1, 0}, {0, -1}, {-1, 0}};
+static int directions[4][2] = {{0, 1}, {1, 0}, {0, -1}, {-1, 0}};
 
 /**
  * @brief  厘米级路径点数组
@@ -267,52 +267,7 @@ int is_valid(int row, int col) {
     return row >= 0 && row < ROWS && col >= 0 && col < COLS;
 }
 
-/**
- * @brief  连通性检查：判断起点是否能到达绝大部分格子
- * @return 1 表示可达格子数 >= 总格子数的 80%，认为地图可用；0 表示连通性过差
- * @note   为什么需要这个函数？
- *         如果障碍物把地图分割成几个互不相通的孤岛，TSP 算法会出问题
- *         （它默认所有可达格子都是连通的）。
- *         这里用 BFS 从起点 (0,0) 向外扩散，统计能走到多少个格子。
- *         如果走到的格子数明显小于总空地数，说明地图被切断了。
- */
-int check_connectivity() {
-    static int visited[ROWS][COLS];  /* static避免栈溢出，全局存储 */
-    static Queue q;
-    int r, c;
-    for (r = 0; r < ROWS; r++)      /* 手动清零 */
-        for (c = 0; c < COLS; c++)
-            visited[r][c] = 0;
-    init_queue(&q);                  /* 初始化队列，front=rear=0 */
-    Point start = {0, 0};            /* 起点设为右下角 A9/B1，对应 grid 索引 (0,0) */
-    enqueue(&q, start);              /* 把起点放入队列，作为 BFS 的第一个探索对象 */
-    visited[0][0] = 1;               /* 标记起点为已访问 */
-    int count = 1;                   /* count 统计已访问的格子数，起点算 1 个 */
 
-    /* BFS 主循环：只要队列里还有节点，就继续探索 */
-    while (!is_queue_empty(&q)) {
-        Point cur = dequeue(&q);     /* 取出队头节点，这是当前要处理的格子 */
-        int i;
-        /* 尝试往四个方向走 */
-        for (i = 0; i < 4; i++) {
-            int nr = cur.row + directions[i][0];  /* 计算新位置的行号 */
-            int nc = cur.col + directions[i][1];  /* 计算新位置的列号 */
-            /* 三个条件同时满足才入队：
-               1. 不越界（is_valid）
-               2. 没访问过（!visited）
-               3. 不是障碍物（grid[nr][nc] == 1） */
-            if (is_valid(nr, nc) && !visited[nr][nc] && grid[nr][nc]) {
-                visited[nr][nc] = 1;              /* 标记为已访问 */
-                enqueue(&q, (Point){nr, nc});     /* 新节点入队，后续会继续探索它的邻居 */
-                count++;                           /* 可达格子数加 1 */
-            }
-        }
-    }
-
-    /* 判断标准：可达格子数 >= (总格子数 - 障碍物数) * 4 / 5
-       也就是至少能到达 80% 的空地，否则认为地图被严重割裂 */
-    return count >= (ROWS * COLS - BARRIER_COUNT) * 4 / 5;
-}
 
 /**
  * @brief  根据硬编码障碍物初始化网格地图
@@ -351,92 +306,6 @@ void collect_accessible_cells() {
 }
 
 /**
- * @brief  计算两个格子之间的曼哈顿距离
- * @param  a  第一个格子坐标
- * @param  b  第二个格子坐标
- * @return 曼哈顿距离 = |row差| + |col差|
- * @note   曼哈顿距离就是"只能横平竖直走时"的最短距离。
- *         例如从 (0,0) 到 (2,3)，必须走 2+3=5 格，距离就是 5。
- *         TSP 最近邻算法用它来衡量"哪个格子离当前位置最近"。
- *         代码里用三目运算符 (dr >= 0 ? dr : -dr) 代替 abs()，避免调用库函数。
- */
-int manhattan_distance(Point a, Point b) {
-    int dr = a.row - b.row;          /* 计算行号之差 */
-    int dc = a.col - b.col;          /* 计算列号之差 */
-    return (dr >= 0 ? dr : -dr) + (dc >= 0 ? dc : -dc);  /* 取绝对值后相加 */
-}
-
-/**
- * @brief  BFS 寻找两格子间的最短路径
- * @param  start   起点坐标
- * @param  end     终点坐标
- * @param  path    输出数组，用于存放找到的最短路径（按顺序）
- * @param  max_len path 数组的最大容量，防止越界
- * @return 路径长度（包含起点和终点），如果不可达返回 0
- * @note   BFS（广度优先搜索）特性：第一次到达终点时，走的一定是步数最少的路径。
- *         因为 BFS 是一层一层向外扩展的，像水波一样，先被访问到的路径一定更短。
- *         parent[][][] 记录每个格子的"爸爸"是谁，方便最后倒推路径。
- */
-int find_shortest_path(Point start, Point end, Point path[], int max_len) {
-    static int visited[ROWS][COLS];  /* static避免栈溢出，全局存储 */
-    static int parent[ROWS][COLS][2];
-    static Queue q;
-    int r, c;
-    for (r = 0; r < ROWS; r++)      /* 手动清零 */
-        for (c = 0; c < COLS; c++)
-            visited[r][c] = 0;
-    init_queue(&q);                  /* 初始化 */
-    enqueue(&q, start);              /* 起点入队 */
-    visited[start.row][start.col] = 1;  /* 标记起点已访问 */
-    parent[start.row][start.col][0] = -1;  /* 起点没有前驱，用 -1 表示"到头了" */
-    parent[start.row][start.col][1] = -1;
-
-    /* BFS 主循环 */
-    while (!is_queue_empty(&q)) {
-        Point cur = dequeue(&q);     /* 取出当前要处理的格子 */
-        /* 如果当前格子就是终点，说明找到了最短路径，开始倒推 */
-        if (cur.row == end.row && cur.col == end.col) {
-            int len = 0;             /* len 记录路径长度 */
-            Point t = end;           /* 从终点开始倒推 */
-            /* 不断查 parent，直到回到起点（parent 为 -1） */
-            while (t.row != -1) {
-                path[len++] = t;     /* 把当前格子存入 path */
-                int pr = parent[t.row][t.col][0];  /* 查"爸爸"的行号 */
-                int pc = parent[t.row][t.col][1];  /* 查"爸爸"的列号 */
-                t.row = pr; t.col = pc;            /* 跳到爸爸的位置 */
-            }
-            {
-                int i;
-                /* 倒推得到的路径是"终点->起点"，需要翻转成"起点->终点" */
-                for (i = 0; i < len / 2; i++) {
-                    Point tmp = path[i];                    /* 暂存头部元素 */
-                    path[i] = path[len - 1 - i];            /* 尾部元素搬到头部 */
-                    path[len - 1 - i] = tmp;                /* 头部元素搬到尾部 */
-                }
-            }
-            return len;              /* 返回路径长度 */
-        }
-        {
-            int i;
-            /* 如果不是终点，继续往四个方向探索 */
-            for (i = 0; i < 4; i++) {
-                int nr = cur.row + directions[i][0];  /* 新行号 */
-                int nc = cur.col + directions[i][1];  /* 新列号 */
-                /* 只有满足三个条件才入队：不越界、未访问、不是障碍物 */
-                if (is_valid(nr, nc) && !visited[nr][nc] && grid[nr][nc]) {
-                    visited[nr][nc] = 1;              /* 标记已访问 */
-                    parent[nr][nc][0] = cur.row;      /* 记录"爸爸"是谁，方便后续倒推 */
-                    parent[nr][nc][1] = cur.col;
-                    enqueue(&q, (Point){nr, nc});     /* 入队，等待后续处理 */
-                }
-            }
-        }
-    }
-
-    return 0;  /* 如果队列都空了还没找到终点，说明两点之间被障碍物彻底隔断，返回 0 */
-}
-
-/**
  * @brief  通用蛇形 TSP（替代最近邻 TSP）
  * @param  order  输出数组，存放计算出的访问顺序
  * @return order 数组的有效长度
@@ -447,9 +316,7 @@ int find_shortest_path(Point start, Point end, Point path[], int max_len) {
  */
 int snake_tsp(Point order[]) {
     int idx = 0;
-    int r, c;
-    int seg_start, seg_end;
-    int in_seg;
+    int r, c, s;
 
     for (r = 0; r < ROWS; r++) {
         /*--- 收集本行的可达段起止列 ---*/
@@ -487,14 +354,14 @@ int snake_tsp(Point order[]) {
         /*--- 按蛇形方向输出本段格子 ---*/
         if (r % 2 == 0) {
             /* 偶数行: A9->A1 方向 (col递增) */
-            for (int s = 0; s < seg_count; s++) {
+            for (s = 0; s < seg_count; s++) {
                 for (c = seg_starts[s]; c <= seg_ends[s]; c++) {
                     order[idx++] = (Point){r, c};
                 }
             }
         } else {
             /* 奇数行: A1->A9 方向 (col递减) */
-            for (int s = seg_count - 1; s >= 0; s--) {
+            for (s = seg_count - 1; s >= 0; s--) {
                 for (c = seg_ends[s]; c >= seg_starts[s]; c--) {
                     order[idx++] = (Point){r, c};
                 }
@@ -505,7 +372,6 @@ int snake_tsp(Point order[]) {
     return idx;
 }
 
-
 /**
  * @brief  列扫描蛇形 TSP（snake_tsp 的列版本）
  * @param  order  输出数组，存放列扫描访问顺序
@@ -515,7 +381,7 @@ int snake_tsp(Point order[]) {
  */
 int snake_tsp_col(Point order[]) {
     int idx = 0;
-    int r, c;
+    int r, c, s;
 
     for (c = 0; c < COLS; c++) {
         /*--- 收集本列可达段起止行 ---*/
@@ -550,13 +416,13 @@ int snake_tsp_col(Point order[]) {
 
         /*--- 偶数列: 从上到下(row递增), 奇数列: 从下到上(row递减) ---*/
         if (c % 2 == 0) {
-            for (int s = 0; s < seg_count; s++) {
+            for (s = 0; s < seg_count; s++) {
                 for (r = seg_starts[s]; r <= seg_ends[s]; r++) {
                     order[idx++] = (Point){r, c};
                 }
             }
         } else {
-            for (int s = seg_count - 1; s >= 0; s--) {
+            for (s = seg_count - 1; s >= 0; s--) {
                 for (r = seg_ends[s]; r >= seg_starts[s]; r--) {
                     order[idx++] = (Point){r, c};
                 }
@@ -566,6 +432,78 @@ int snake_tsp_col(Point order[]) {
 
     return idx;
 }
+
+/**
+ * @brief  BFS 寻找两格子间的最短路径
+ * @param  start   起点坐标
+ * @param  end     终点坐标
+ * @param  path    输出数组，用于存放找到的最短路径（按顺序）
+ * @param  max_len path 数组的最大容量，防止越界
+ * @return 路径长度（包含起点和终点），如果不可达返回 0
+ * @note   BFS（广度优先搜索）特性：第一次到达终点时，走的一定是步数最少的路径。
+ *         因为 BFS 是一层一层向外扩展的，像水波一样，先被访问到的路径一定更短。
+ *         parent[][][] 记录每个格子的"爸爸"是谁，方便最后倒推路径。
+ */
+int find_shortest_path(Point start, Point end, Point path[], int max_len) {
+    static int visited[ROWS][COLS];  /* static避免栈溢出，全局存储 */
+    static int parent[ROWS][COLS][2];
+    static Queue q;
+    int r, c;
+    for (r = 0; r < ROWS; r++)      /* 手动清零 */
+        for (c = 0; c < COLS; c++)
+            visited[r][c] = 0;
+    init_queue(&q);                  /* 初始化 */
+    enqueue(&q, start);              /* 起点入队 */
+    visited[start.row][start.col] = 1;  /* 标记起点已访问 */
+    parent[start.row][start.col][0] = -1;  /* 起点没有前驱，用 -1 表示"到头了" */
+    parent[start.row][start.col][1] = -1;
+
+    /* BFS 主循环 */
+    while (!is_queue_empty(&q)) {
+        Point cur = dequeue(&q);     /* 取出当前要处理的格子 */
+        /* 如果当前格子就是终点，说明找到了最短路径，开始倒推 */
+        if (cur.row == end.row && cur.col == end.col) {
+            int len = 0;             /* len 记录路径长度 */
+            Point t = end;           /* 从终点开始倒推 */
+            /* 不断查 parent，直到回到起点（parent 为 -1） */
+            while (t.row != -1 && len < max_len) {
+                path[len++] = t;     /* 把当前格子存入 path */
+                int pr = parent[t.row][t.col][0];  /* 查"爸爸"的行号 */
+                int pc = parent[t.row][t.col][1];  /* 查"爸爸"的列号 */
+                t.row = pr; t.col = pc;            /* 跳到爸爸的位置 */
+            }
+            if (len >= max_len) return 0;  /* 路径超长，防御性返回失败 */
+            {
+                int i;
+                /* 倒推得到的路径是"终点->起点"，需要翻转成"起点->终点" */
+                for (i = 0; i < len / 2; i++) {
+                    Point tmp = path[i];                    /* 暂存头部元素 */
+                    path[i] = path[len - 1 - i];            /* 尾部元素搬到头部 */
+                    path[len - 1 - i] = tmp;                /* 头部元素搬到尾部 */
+                }
+            }
+            return len;              /* 返回路径长度 */
+        }
+        {
+            int i;
+            /* 如果不是终点，继续往四个方向探索 */
+            for (i = 0; i < 4; i++) {
+                int nr = cur.row + directions[i][0];  /* 新行号 */
+                int nc = cur.col + directions[i][1];  /* 新列号 */
+                /* 只有满足三个条件才入队：不越界、未访问、不是障碍物 */
+                if (is_valid(nr, nc) && !visited[nr][nc] && grid[nr][nc]) {
+                    visited[nr][nc] = 1;              /* 标记已访问 */
+                    parent[nr][nc][0] = cur.row;      /* 记录"爸爸"是谁，方便后续倒推 */
+                    parent[nr][nc][1] = cur.col;
+                    enqueue(&q, (Point){nr, nc});     /* 入队，等待后续处理 */
+                }
+            }
+        }
+    }
+
+    return 0;  /* 如果队列都空了还没找到终点，说明两点之间被障碍物彻底隔断，返回 0 */
+}
+
 /**
  * @brief  将 TSP 访问顺序拼接为完整逐格路径
  * @param  order  TSP 计算出的访问顺序数组
@@ -590,6 +528,11 @@ void build_full_path(Point order[], int count) {
         Point end = order[i + 1];    /* 当前段的终点 */
         int seg_len = find_shortest_path(start, end, g_seg_buffer, MAX_PATH_LENGTH);  /* 调用 BFS */
         int j;
+        if (seg_len == 0) {
+            /* BFS找不到路径：两点被障碍物彻底隔断 */
+            final_path_length = 0;   /* 标记路径无效 */
+            return;                  /* 立即终止，不再继续拼接 */
+        }
         /* 把当前段拼接到 final_path 后面。
            i==0 时保留全部（包含起点）；i>0 时跳过 seg[0]（重复节点） */
         for (j = (i == 0 ? 0 : 1); j < seg_len; j++) {
