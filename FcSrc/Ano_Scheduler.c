@@ -51,18 +51,6 @@ static void Loop_100Hz(void) //10ms执行一次
 
 static void Loop_50Hz(void) //20ms执行一次
 {
-	// //////////////////////////////////////////////////////////////////////
-	// // 延时约3秒后使能UART3接收中断，避开树莓派启动冲击
-	// static u16 uart3_rx_delay_cnt = 0;
-	// if (uart3_rx_delay_cnt < 150)
-	// {
-	// 	uart3_rx_delay_cnt++;
-	// 	if (uart3_rx_delay_cnt == 150)
-	// 	{
-	// 		DrvUart3RxEnable();
-	// 	}
-	// }
-	//////////////////////////////////////////////////////////////////////
 	// 读取已通过CRC16校验的树莓派定位数据
 	static u8 pi_data[4];
 	if (Pi_GetData_Flag())

@@ -325,20 +325,10 @@ void DrvUart3Init(u32 br_num)
     USART_Init(USART3, &USART_InitStructure);
     USART_ClockInit(USART3, &USART_ClockInitStruct);
 
-    //初始化阶段暂不打开RX中断，等飞控就绪后再由Ano_Scheduler打开
-    //USART_ITConfig(USART3, USART_IT_RXNE, ENABLE);
-    //使能USART2
+    //使能USART3接收中断，树莓派上电后可立即发送SLAM定位数据
+    USART_ITConfig(USART3, USART_IT_RXNE, ENABLE);
+    //使能USART3
     USART_Cmd(USART3, ENABLE);
-}
-
-void DrvUart3RxEnable(void)
-{
-    static u8 enabled = 0;
-    if (!enabled)
-    {
-        enabled = 1;
-        USART_ITConfig(USART3, USART_IT_RXNE, ENABLE);
-    }
 }
 
 u8 Tx3Buffer[256];
