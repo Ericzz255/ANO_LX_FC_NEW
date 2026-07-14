@@ -41,6 +41,14 @@ CRC采用 **CRC16-CCITT-FALSE**：初值 `0xFFFF`，多项式 `0x1021`，不反�
 **数据消费位置：** `Ano_Scheduler.c` 的 `Loop_50Hz()` 中，每隔 20ms 读取一次，更新全局变量 `now_x`、`now_y`。  
 **当前用途：** 更新 `now_x`、`now_y`，暂未参与飞行控制闭环。
 
+调试阶段每收到一帧通过CRC校验的坐标，飞控会通过USART2以115200波特率输出一行ASCII文本：
+
+```text
+SLAM_OK,X=-123,Y=456
+```
+
+若需要停止打印，将 `Ano_Scheduler.c` 中的 `SLAM_UART2_DEBUG` 改为 `0`。
+
 ### 3.2 地面站数据 (USART2)
 
 **帧格式：** `0x45` (帧头) + 2字节有效数据 + `0x46` (帧尾)
