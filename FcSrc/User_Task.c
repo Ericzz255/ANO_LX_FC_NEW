@@ -1,10 +1,8 @@
 /**
  * @file    User_Task.c
  * @brief   一键程控任务状态机
- * @details 本文件为 "260506 无人机目标检测" 任务的程控状态机，包含：
- *          1) 水平位置 PID 控制器（当前未使用，保留备用）
- *          2) 一键程控任务状态机：由遥控器 CH6 高位触发，自动完成
- *             起飞 -> 路径规划 -> 逐格移动（含停留检测）-> 降落的完整流程。
+ * @details 本文件为无人机网格巡航任务的程控状态机，由遥控器 CH6 高位触发，
+ *          自动完成起飞、路径规划、逐格移动和降落流程。
  *
  * @author  Eric2195
  * @version 当前版本：Horizontal_Move 固定时间版（2026-05-21）
@@ -22,7 +20,6 @@
 #include "LX_FC_State.h"
 #include "Ano_Scheduler.h"
 #include "Usart2.h"
-#include "Usart3_Pi.h"
 
 /**
  * @brief  当前飞机水平位置（由树莓派 SLAM 通过 USART3 实时更新）
@@ -51,13 +48,12 @@ s16 now_y = 0;
  *           case 5 : 等待地面站按下路径规划按钮 (GS_PlanCmd_Received())
  *           case 6 : 一键起飞到 110cm (OneKey_Takeoff(110))
  *           case 7 : 悬停稳定 4s
- *           case 8 : 航点跟踪：逐格移动 + MaixCam视觉查询 + 反馈（内含子状态机 move_sub_step）
+ *           case 8 : 航点跟踪：按规划路径逐格移动（内含子状态机 move_sub_step）
  *           case 9 : 降落 (OneKey_Land())
  *
  *         【case 8 子状态机】（move_sub_step）：
  *           sub_step 0 : 计算下一格方向，发送 Horizontal_Move 指令
- *           sub_step 1 : 等待移动完成（固定 6s），发送查询给MaixCam，等2s接收响应
- *                        收到则转发检测结果给地面端，完成后直接回到 sub_step 0 处理下一格
+ *           sub_step 1 : 等待移动完成（固定6s），随后进入下一格
  *
  *         【安全保护】：
  *           - CH6 中位：立即清零 vel_x/vel_y/vel_z，重置所有状态
@@ -69,7 +65,6 @@ void UserTask_OneKeyCmd(void)
     static u8 one_key_mission_f = 0;
     static u8 mission_step = 0;
     static u16 delay_cnt_ms = 0;
-    static u16 hover_delay_ms = 0;
     static u8 wp_idx = 0;
     static u8 move_sub_step = 0;
     static u16 move_wait_ms = 0;
@@ -95,7 +90,6 @@ void UserTask_OneKeyCmd(void)
                 one_key_mission_f = 1;
                 mission_step = 1;
                 delay_cnt_ms = 0;
-                hover_delay_ms = 0;
             }
         }
         else
@@ -110,7 +104,6 @@ void UserTask_OneKeyCmd(void)
             case 0:
             {
                 delay_cnt_ms = 0;
-                hover_delay_ms = 0;
             }
             break;
 
@@ -184,8 +177,6 @@ void UserTask_OneKeyCmd(void)
 
             case 8:
             {
-                static u8 maixcam_query_sent = 0;
-
                 if (wp_idx < final_path_length - 1)
                 {
                     if (move_sub_step == 0)
@@ -209,61 +200,16 @@ void UserTask_OneKeyCmd(void)
                         {
                             move_sub_step = 1;
                             move_wait_ms = 0;
-                            maixcam_query_sent = 0;
                         }
                     }
                     else if (move_sub_step == 1)
                     {
                         move_wait_ms += 20;
-                        if (move_wait_ms >= 3000)
+                        if (move_wait_ms >= 6000)
                         {
-                            /* 移动完成，发送格子坐标给MaixCam查询视觉 */
-                            if (!maixcam_query_sent)
-                            {
-                                Pi_ClearRxState(); /* 丢弃移动期间堆积的旧数据 */
-                                Point p = final_path[wp_idx + 1];
-                                u8 grid_a = (u8)(COLS - p.col); /* A=列(1-9) */
-                                u8 grid_b = (u8)(p.row + 1);    /* B=行(1-7) */
-                                Pi_SendGridQuery(grid_a, grid_b);
-                                maixcam_query_sent = 1;
-                                move_wait_ms = 0;
-                            }
-                            else if (move_wait_ms >= 1500)
-                            {
-                                /* 等待MaixCam响应（最多2s），收到则转发给地面端 */
-                                if (MaixCam_GetData_Flag())
-                                {
-                                    u8 pi_data[20];
-                                    Pi_GetData(pi_data);
-                                    u8 n = pi_data[2]; /* 检测到的字符数量 */
-                                    if (n > 0 && pi_data[8] == 0x01)
-                                    {
-                                        u8 grid_x = pi_data[0];
-                                        u8 grid_y = pi_data[1];
-                                        u8 i;
-                                        for (i = 0; i < n && i < 5; i++)
-                                        {
-                                            u8 ch = pi_data[3 + i];
-                                            if (ch != 0)
-                                            {
-                                                u8 fb_buf[6];
-                                                fb_buf[0] = 0x5A;
-                                                fb_buf[1] = ch;
-                                                fb_buf[2] = grid_x;
-                                                fb_buf[3] = grid_y;
-                                                fb_buf[4] = 0x5F;
-                                                fb_buf[5] = ch + grid_x + grid_y;
-                                                DrvUart2SendBuf(fb_buf, 6);
-                                            }
-                                        }
-                                    }
-                                }
-                                /* 处理完直接进入下一格 */
-                                maixcam_query_sent = 0;
-                                wp_idx++;
-                                move_wait_ms = 0;
-                                move_sub_step = 0; /* 回到 sub_step 0 发送下一个 Horizontal_Move */
-                            }
+                            wp_idx++;
+                            move_wait_ms = 0;
+                            move_sub_step = 0;
                         }
                     }
                 }
@@ -272,7 +218,6 @@ void UserTask_OneKeyCmd(void)
                     wp_idx = 0;
                     move_sub_step = 0;
                     move_wait_ms = 0;
-                    maixcam_query_sent = 0;
                     mission_step++;
                 }
             }
@@ -296,7 +241,6 @@ void UserTask_OneKeyCmd(void)
 
             mission_step = 0;
             delay_cnt_ms = 0;
-            hover_delay_ms = 0;
             wp_idx = 0;
             move_sub_step = 0;
             move_wait_ms = 0;
@@ -311,7 +255,6 @@ void UserTask_OneKeyCmd(void)
         mission_step = 0;
         one_key_mission_f = 0;
         delay_cnt_ms = 0;
-        hover_delay_ms = 0;
         wp_idx = 0;
         move_sub_step = 0;
         move_wait_ms = 0;

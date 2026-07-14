@@ -1,109 +1,127 @@
 /**
  * @file Usart3_Pi.c
- * @brief USART3 驱动 —— MaixCam视觉模块通信
+ * @brief USART3 驱动 —— 树莓派 SLAM 定位数据接收
  *
- * 硬件连接: MaixCam via UART3 (PB10/PB11, 115200)
- * 主要用途: 发送格子坐标给MaixCam，接收视觉识别结果
- *
- * 查询协议: 飞控发送 "#GRID,AxBx*CS\r\n" 给MaixCam
- * 响应协议: 帧头 0x45 + 10字节数据 + 帧尾 0x46
- *           [0]:grid_x(1-9) [1]:grid_y(1-7) [2]:检测数N [3-7]:字符(最多5)
- *           [8]:有效标志(0x01) [9]:校验和(前9字节之和低8位)
+ * 硬件连接: N10P 雷达 -> 树莓派 SLAM -> USART3 (115200)
+ * 帧格式: 45 53 05 SEQ X_H X_L Y_H Y_L CRC_H CRC_L
+ * CRC16-CCITT计算范围: LEN、SEQ、X_H、X_L、Y_H、Y_L
  */
 
 #include "Usart3_Pi.h"
-#include "Drv_Uart.h"
 
-/* MaixCam响应帧有效数据长度：10字节 */
-#define PI_VALID_BYTE_LENGTH 10
+#define PI_HEADER_1           0x45
+#define PI_HEADER_2           0x53
+#define PI_PAYLOAD_LENGTH     5
+#define PI_POSITION_LENGTH    4
+#define PI_CRC16_INITIAL      0xFFFF
 
-/* 一帧数据接收完成标志（供 Loop_50Hz SLAM 数据读取使用） */
-static u8 g_Pi_dataAnlScs_flag = RESET;
-/* MaixCam 专用数据就绪标志（供 User_Task.c case 8 使用，不被 Loop_50Hz 消耗） */
-static u8 g_Maixcam_data_ready = RESET;
-/* 接收缓存区 */
-static u8 g_Pi_val_data[50];
-
-/* 解析状态机变量（文件级，供 Pi_ClearRxState 重置） */
-static u8 g_Pi_rx_state = 0;
-static u8 g_Pi_pack_data_pointer = 0;
-static u8 g_Pi_rx_checksum = 0;
-
-/* 外部声明 UART3 环形缓冲区计数器（用于清空旧数据） */
-extern u8 U3RxInCnt;
-extern u8 U3RxoutCnt;
-
-/**
- * @brief MaixCam数据逐字节解析（状态机）
- * @note  数据格式：帧头 0x45 + 10字节 + 帧尾 0x46
- *        [0]:grid_x [1]:grid_y [2]:N [3-7]:chars [8]:valid [9]:checksum
- */
-void Pi_DataAnl(u8 com_data)
+typedef enum
 {
-	if (!g_Pi_dataAnlScs_flag)
+	PI_RX_WAIT_HEADER_1 = 0,
+	PI_RX_WAIT_HEADER_2,
+	PI_RX_WAIT_LENGTH,
+	PI_RX_READ_PAYLOAD,
+	PI_RX_READ_CRC_HIGH,
+	PI_RX_READ_CRC_LOW
+} PiRxState;
+
+static volatile u8 g_Pi_dataAnlScs_flag = RESET;
+static u8 g_Pi_val_data[PI_POSITION_LENGTH];
+
+static u16 Pi_Crc16Update(u16 crc, u8 data)
+{
+	u8 bit;
+	crc ^= (u16)data << 8;
+	for (bit = 0; bit < 8; bit++)
 	{
-		if (g_Pi_rx_state == 0)
+		if (crc & 0x8000)
 		{
-			g_Pi_rx_checksum = 0;
-			if (com_data == 0x45)
-			{
-				g_Pi_rx_state = 1;
-			}
-		}
-		else if (g_Pi_rx_state == 1)
-		{
-			*(g_Pi_val_data + g_Pi_pack_data_pointer) = com_data;
-			if (g_Pi_pack_data_pointer < 9)
-			{
-				g_Pi_rx_checksum += com_data;
-			}
-			g_Pi_pack_data_pointer++;
-			if (g_Pi_pack_data_pointer >= PI_VALID_BYTE_LENGTH)
-			{
-				g_Pi_rx_state = 2;
-				g_Pi_pack_data_pointer = 0;
-			}
-		}
-		else if (g_Pi_rx_state == 2)
-		{
-			if (com_data == 0x46 && g_Pi_val_data[9] == g_Pi_rx_checksum)
-			{
-				g_Pi_rx_state = 0;
-				g_Pi_dataAnlScs_flag = SET;
-				g_Maixcam_data_ready = SET; /* 同时设置 MaixCam 专用标志 */
-			}
-			else
-			{
-				g_Pi_rx_state = 0;
-			}
+			crc = (u16)((crc << 1) ^ 0x1021);
 		}
 		else
 		{
-			g_Pi_rx_state = 0;
-			g_Pi_pack_data_pointer = 0;
+			crc <<= 1;
 		}
+	}
+	return crc;
+}
+
+/**
+ * @brief 树莓派定位数据逐字节解析状态机
+ * @note 固定长度字段允许坐标数据包含0x45或0x53；只有CRC正确才发布坐标。
+ */
+void Pi_DataAnl(u8 com_data)
+{
+	static PiRxState rx_state = PI_RX_WAIT_HEADER_1;
+	static u8 payload[PI_PAYLOAD_LENGTH];
+	static u8 payload_index = 0;
+	static u16 crc_calculated = PI_CRC16_INITIAL;
+	static u16 crc_received = 0;
+	u8 i;
+
+	switch (rx_state)
+	{
+	case PI_RX_WAIT_HEADER_1:
+		if (com_data == PI_HEADER_1)
+		{
+			rx_state = PI_RX_WAIT_HEADER_2;
+		}
+		break;
+
+	case PI_RX_WAIT_HEADER_2:
+		if (com_data == PI_HEADER_2)
+		{
+			rx_state = PI_RX_WAIT_LENGTH;
+		}
+		else if (com_data != PI_HEADER_1)
+		{
+			rx_state = PI_RX_WAIT_HEADER_1;
+		}
+		break;
+
+	case PI_RX_WAIT_LENGTH:
+		if (com_data == PI_PAYLOAD_LENGTH)
+		{
+			payload_index = 0;
+			crc_calculated = Pi_Crc16Update(PI_CRC16_INITIAL, com_data);
+			rx_state = PI_RX_READ_PAYLOAD;
+		}
+		else
+		{
+			rx_state = (com_data == PI_HEADER_1) ? PI_RX_WAIT_HEADER_2 : PI_RX_WAIT_HEADER_1;
+		}
+		break;
+
+	case PI_RX_READ_PAYLOAD:
+		payload[payload_index++] = com_data;
+		crc_calculated = Pi_Crc16Update(crc_calculated, com_data);
+		if (payload_index >= PI_PAYLOAD_LENGTH)
+		{
+			rx_state = PI_RX_READ_CRC_HIGH;
+		}
+		break;
+
+	case PI_RX_READ_CRC_HIGH:
+		crc_received = (u16)com_data << 8;
+		rx_state = PI_RX_READ_CRC_LOW;
+		break;
+
+	case PI_RX_READ_CRC_LOW:
+		crc_received |= com_data;
+		if (crc_received == crc_calculated)
+		{
+			/* payload[0]为序号，payload[1..4]为X/Y坐标。 */
+			for (i = 0; i < PI_POSITION_LENGTH; i++)
+			{
+				g_Pi_val_data[i] = payload[i + 1];
+			}
+			g_Pi_dataAnlScs_flag = SET;
+		}
+		rx_state = (com_data == PI_HEADER_1) ? PI_RX_WAIT_HEADER_2 : PI_RX_WAIT_HEADER_1;
+		break;
 	}
 }
 
-/**
- * @brief 清空接收状态机并丢弃旧数据
- * @note  在发送查询前调用，清空解析状态和环形缓冲区，防止收到MaixCam的旧数据
- */
-void Pi_ClearRxState(void)
-{
-	g_Pi_dataAnlScs_flag = RESET;
-	g_Maixcam_data_ready = RESET;
-	g_Pi_rx_state = 0;
-	g_Pi_pack_data_pointer = 0;
-	g_Pi_rx_checksum = 0;
-	/* 丢弃UART3环形缓冲区中已接收但未处理的旧数据 */
-	U3RxInCnt = U3RxoutCnt;
-}
-
-/**
- * @brief 查询MaixCam数据接收完成标志
- * @return SET(1) 有检测结果已就绪；RESET(0) 暂无
- */
 u8 Pi_GetData_Flag(void)
 {
 	if (g_Pi_dataAnlScs_flag)
@@ -114,45 +132,11 @@ u8 Pi_GetData_Flag(void)
 	return RESET;
 }
 
-/**
- * @brief 拷贝MaixCam检测数据到外部缓冲区
- * @param store_array 外部缓冲区，长度至少 10 字节
- */
-void Pi_GetData(u8* store_array)
+void Pi_GetData(u8 *store_array)
 {
-	for (u8 i = 0; i < PI_VALID_BYTE_LENGTH; i++)
+	u8 i;
+	for (i = 0; i < PI_POSITION_LENGTH; i++)
 	{
-		*(store_array++) = *(g_Pi_val_data + i);
+		store_array[i] = g_Pi_val_data[i];
 	}
-}
-
-/**
- * @brief 查询MaixCam专用数据就绪标志（不被 Loop_50Hz 的 SLAM 数据读取消耗）
- * @return SET(1) MaixCam检测结果已就绪；RESET(0) 暂无
- * @note  与 Pi_GetData_Flag() 共用同一数据缓冲区，但使用独立标志位，
- *         避免 Loop_50Hz 中读取 SLAM 数据时意外清除 MaixCam 响应标志。
- */
-u8 MaixCam_GetData_Flag(void)
-{
-	if (g_Maixcam_data_ready)
-	{
-		g_Maixcam_data_ready = RESET;
-		return SET;
-	}
-	return RESET;
-}
-
-/**
- * @brief 发送格子坐标查询给MaixCam
- * @param grid_a 列号A(1-9)
- * @param grid_b 行号B(1-7)
- * @note  发送格式: "#GRID,AxBx*CS\r\n"
- */
-void Pi_SendGridQuery(u8 grid_a, u8 grid_b)
-{
-	char buf[32];
-	/* grid_a=列号A(1-9), grid_b=行号B(1-7), 发送格式 #GRID,A<col>B<row>*CS */
-	u8 cs = ('A' + grid_a + 'B' + grid_b) & 0xFF;
-	snprintf(buf, sizeof(buf), "#GRID,A%dB%d*%02X\r\n", grid_a, grid_b, cs);
-	DrvUart3SendBuf((u8*)buf, strlen(buf));
 }

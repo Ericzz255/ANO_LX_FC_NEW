@@ -63,8 +63,8 @@ static void Loop_50Hz(void) //20ms执行一次
 	// 	}
 	// }
 	//////////////////////////////////////////////////////////////////////
-	// 读取树莓派定位数据
-	static u8 pi_data[10];
+	// 读取已通过CRC16校验的树莓派定位数据
+	static u8 pi_data[4];
 	if (Pi_GetData_Flag())
 	{
 		Pi_GetData(pi_data);
