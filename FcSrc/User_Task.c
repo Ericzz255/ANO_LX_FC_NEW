@@ -20,51 +20,9 @@
 #include "Ano_Math.h"
 #include "ANO_LX.h"
 #include "LX_FC_State.h"
-
-// /*============================ PID 参数与函数 ============================*/
-// /**
-//  * @note PID 部分说明
-//  * 以下 y_move_pid / x_move_pid 为水平位置闭环控制器的雏形，
-//  * 当前任务流程（UserTask_OneKeyCmd case 7）采用 Horizontal_Move 协议指令
-//  * 做固定时间逐格移动，未调用本 PID。
-//  * 保留原因：若后续需要基于雷达/光流坐标做实时闭环修正，可直接启用。
-//  *
-//  * 坐标映射约定（与雷达 SLAM 一致）：
-//  *   - Y 方向：机头正前方为正，对应 vel_x（rt_tar.st_data.vel_x）
-//  *   - X 方向：飞机左侧为正，对应 vel_y（rt_tar.st_data.vel_y）
-//  */
-
-// /* 水平位置 Y 方向（机头前后）PD 参数 */
-// #define KP1 0.40f
-// #define KD1 0.05f
-
-// /* 水平位置 X 方向（飞机左右）PD 参数 */
-// #define KP2 0.35f
-// #define KD2 0.08f
-
-// float y_move_pid(s16 cy)
-// {
-//     static float err_old;
-//     float err_d;
-//     float pid_out_y;
-//     err_d = cy - err_old;
-//     err_old = cy;
-//     pid_out_y = KP1 * cy + KD1 * err_d;
-//     pid_out_y = -LIMIT(pid_out_y, -10, 10);
-//     return pid_out_y;
-// }
-
-// float x_move_pid(s16 cx)
-// {
-//     static float err_old;
-//     float err_d;
-//     float pid_out_x;
-//     err_d = cx - err_old;
-//     err_old = cx;
-//     pid_out_x = KP2 * cx + KD2 * err_d;
-//     pid_out_x = -LIMIT(pid_out_x, -10, 10);
-//     return pid_out_x;
-// }
+#include "Ano_Scheduler.h"
+#include "Usart2.h"
+#include "Usart3_Pi.h"
 
 /**
  * @brief  当前飞机水平位置（由树莓派 SLAM 通过 USART3 实时更新）
@@ -89,16 +47,17 @@ s16 now_y = 0;
  *           case 1 : 切换为程控模式 (LX_Change_Mode(3))
  *           case 2 : 解锁电机 (FC_Unlock())
  *           case 3 : 延时 2s，等待解锁稳定
- *           case 4 : 一键起飞到 50cm (OneKey_Takeoff(50))
- *           case 5 : 悬停稳定 3s
- *           case 6 : 执行路径规划 (run_path_planner())
- *           case 7 : 航点跟踪：逐格移动 + 停留检测（内含子状态机 move_sub_step）
- *           case 8 : 降落 (OneKey_Land())
+ *           case 4 : 等待地面站发送3个禁飞区坐标 (GS_Barrier_Received())
+ *           case 5 : 等待地面站按下路径规划按钮 (GS_PlanCmd_Received())
+ *           case 6 : 一键起飞到 110cm (OneKey_Takeoff(110))
+ *           case 7 : 悬停稳定 4s
+ *           case 8 : 航点跟踪：逐格移动 + MaixCam视觉查询 + 反馈（内含子状态机 move_sub_step）
+ *           case 9 : 降落 (OneKey_Land())
  *
- *         【case 7 子状态机】（move_sub_step）：
+ *         【case 8 子状态机】（move_sub_step）：
  *           sub_step 0 : 计算下一格方向，发送 Horizontal_Move 指令
- *           sub_step 1 : 等待移动完成（固定 6s）
- *           sub_step 2 : 停留检测 1s（目标检测窗口），完成后 wp_idx++
+ *           sub_step 1 : 等待移动完成（固定 6s），发送查询给MaixCam，等2s接收响应
+ *                        收到则转发检测结果给地面端，完成后直接回到 sub_step 0 处理下一格
  *
  *         【安全保护】：
  *           - CH6 中位：立即清零 vel_x/vel_y/vel_z，重置所有状态
@@ -146,56 +105,52 @@ void UserTask_OneKeyCmd(void)
 
         if (one_key_mission_f == 1)
         {
-            switch(mission_step)
+            switch (mission_step)
             {
-                case 0:
+            case 0:
+            {
+                delay_cnt_ms = 0;
+                hover_delay_ms = 0;
+            }
+            break;
+
+            case 1:
+            {
+                mission_step += LX_Change_Mode(3);
+            }
+            break;
+
+            case 2:
+            {
+                mission_step += FC_Unlock();
+            }
+            break;
+
+            case 3:
+            {
+                delay_cnt_ms += 20;
+                if (delay_cnt_ms >= 2000)
                 {
                     delay_cnt_ms = 0;
-                    hover_delay_ms = 0;
+                    mission_step++;
                 }
-                break;
+            }
+            break;
 
-                case 1:
+            case 4:
+            {
+                /* 等待地面站发送3个禁飞区坐标 */
+                if (GS_Barrier_Received())
                 {
-                    mission_step += LX_Change_Mode(3);
+                    mission_step++;
                 }
-                break;
+            }
+            break;
 
-                case 2:
-                {
-                    mission_step += FC_Unlock();
-                }
-                break;
-
-                case 3:
-                {
-                    delay_cnt_ms += 20;
-                    if (delay_cnt_ms >= 2000)
-                    {
-                        delay_cnt_ms = 0;
-                        mission_step++;
-                    }
-                }
-                break;
-
-                case 4:
-                {
-                    mission_step += OneKey_Takeoff(50);
-                }
-                break;
-
-                case 5:
-                {
-                    delay_cnt_ms += 20;
-                    if (delay_cnt_ms >= 3000)
-                    {
-                        delay_cnt_ms = 0;
-                        mission_step++;
-                    }
-                }
-                break;
-
-                case 6:
+            case 5:
+            {
+                /* 等待地面站发送路径规划触发命令(0x55+0xA1+0x65) */
+                if (GS_PlanCmd_Received())
                 {
                     run_path_planner();
                     if (final_path_length > 0)
@@ -204,72 +159,133 @@ void UserTask_OneKeyCmd(void)
                     }
                     else
                     {
-                        mission_step = 8;
+                        mission_step = 9; /* 路径规划失败，跳过起飞直接降落 */
                     }
                 }
-                break;
+            }
+            break;
 
-                case 7:
+            case 6:
+            {
+                mission_step += OneKey_Takeoff(110);
+            }
+            break;
+
+            case 7:
+            {
+                delay_cnt_ms += 20;
+                if (delay_cnt_ms >= 4000)
                 {
-                    if (wp_idx < final_path_length - 1)
+                    delay_cnt_ms = 0;
+                    mission_step++;
+                }
+            }
+            break;
+
+            case 8:
+            {
+                static u8 maixcam_query_sent = 0;
+
+                if (wp_idx < final_path_length - 1)
+                {
+                    if (move_sub_step == 0)
                     {
-                        if (move_sub_step == 0)
+                        Point cur = final_path[wp_idx];
+                        Point next = final_path[wp_idx + 1];
+                        int dr = next.row - cur.row;
+                        int dc = next.col - cur.col;
+
+                        u16 angle = 0;
+                        if (dr == 1 && dc == 0)
+                            angle = 0;
+                        else if (dr == -1 && dc == 0)
+                            angle = 180;
+                        else if (dr == 0 && dc == 1)
+                            angle = 270;
+                        else if (dr == 0 && dc == -1)
+                            angle = 90;
+
+                        if (Horizontal_Move(GRID_SIZE_CM, 25, angle))
                         {
-                            Point cur = final_path[wp_idx];
-                            Point next = final_path[wp_idx + 1];
-                            int dr = next.row - cur.row;
-                            int dc = next.col - cur.col;
-
-                            u16 angle = 0;
-                            if (dr == 1 && dc == 0)       angle = 0;
-                            else if (dr == -1 && dc == 0) angle = 180;
-                            else if (dr == 0 && dc == 1)  angle = 270;
-                            else if (dr == 0 && dc == -1) angle = 90;
-
-                            if (Horizontal_Move(GRID_SIZE_CM, 15, angle))
+                            move_sub_step = 1;
+                            move_wait_ms = 0;
+                            maixcam_query_sent = 0;
+                        }
+                    }
+                    else if (move_sub_step == 1)
+                    {
+                        move_wait_ms += 20;
+                        if (move_wait_ms >= 3000)
+                        {
+                            /* 移动完成，发送格子坐标给MaixCam查询视觉 */
+                            if (!maixcam_query_sent)
                             {
-                                move_sub_step = 1;
+                                Pi_ClearRxState(); /* 丢弃移动期间堆积的旧数据 */
+                                Point p = final_path[wp_idx + 1];
+                                u8 grid_a = (u8)(COLS - p.col); /* A=列(1-9) */
+                                u8 grid_b = (u8)(p.row + 1);    /* B=行(1-7) */
+                                Pi_SendGridQuery(grid_a, grid_b);
+                                maixcam_query_sent = 1;
                                 move_wait_ms = 0;
                             }
-                        }
-                        else if (move_sub_step == 1)
-                        {
-                            move_wait_ms += 20;
-                            if (move_wait_ms >= 6000)
+                            else if (move_wait_ms >= 1500)
                             {
-                                move_wait_ms = 0;
-                                move_sub_step = 2;
-                            }
-                        }
-                        else if (move_sub_step == 2)
-                        {
-                            move_wait_ms += 20;
-                            if (move_wait_ms >= 1000)
-                            {
-                                move_wait_ms = 0;
-                                move_sub_step = 0;
+                                /* 等待MaixCam响应（最多2s），收到则转发给地面端 */
+                                if (MaixCam_GetData_Flag())
+                                {
+                                    u8 pi_data[20];
+                                    Pi_GetData(pi_data);
+                                    u8 n = pi_data[2]; /* 检测到的字符数量 */
+                                    if (n > 0 && pi_data[8] == 0x01)
+                                    {
+                                        u8 grid_x = pi_data[0];
+                                        u8 grid_y = pi_data[1];
+                                        u8 i;
+                                        for (i = 0; i < n && i < 5; i++)
+                                        {
+                                            u8 ch = pi_data[3 + i];
+                                            if (ch != 0)
+                                            {
+                                                u8 fb_buf[6];
+                                                fb_buf[0] = 0x5A;
+                                                fb_buf[1] = ch;
+                                                fb_buf[2] = grid_x;
+                                                fb_buf[3] = grid_y;
+                                                fb_buf[4] = 0x5F;
+                                                fb_buf[5] = ch + grid_x + grid_y;
+                                                DrvUart2SendBuf(fb_buf, 6);
+                                            }
+                                        }
+                                    }
+                                }
+                                /* 处理完直接进入下一格 */
+                                maixcam_query_sent = 0;
                                 wp_idx++;
+                                move_wait_ms = 0;
+                                move_sub_step = 0; /* 回到 sub_step 0 发送下一个 Horizontal_Move */
                             }
                         }
                     }
-                    else
-                    {
-                        wp_idx = 0;
-                        move_sub_step = 0;
-                        move_wait_ms = 0;
-                        mission_step++;
-                    }
                 }
-                break;
-
-                case 8:
+                else
                 {
-                    mission_step += OneKey_Land();
+                    wp_idx = 0;
+                    move_sub_step = 0;
+                    move_wait_ms = 0;
+                    maixcam_query_sent = 0;
+                    mission_step++;
                 }
-                break;
+            }
+            break;
 
-                default:
-                    break;
+            case 9:
+            {
+                mission_step += OneKey_Land();
+            }
+            break;
+
+            default:
+                break;
             }
         }
         else

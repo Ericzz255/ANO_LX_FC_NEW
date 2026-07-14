@@ -7,6 +7,7 @@
 **********************************************************************************/
 #include "Ano_Scheduler.h"
 #include "User_Task.h"
+#include "Path_Planning.h"
 #include "Usart2.h"
 #include "Usart3_Pi.h"
 #include "Drv_Uart.h"
@@ -15,6 +16,10 @@
 //////////////////////////////////////////////////////////////////////
 //用户程序调度器
 //////////////////////////////////////////////////////////////////////
+
+/* 禁飞区接收状态（文件级变量，供 GS_Barrier_Received() 供 User_Task.c 查询） */
+static u8 gs_barrier_received = 0;
+static u8 gs_data[10];
 
 static void Loop_1000Hz(void) //1ms执行一次
 {
@@ -67,65 +72,46 @@ static void Loop_50Hz(void) //20ms执行一次
 		now_y = (s16)((pi_data[2] << 8) | pi_data[3]);
 	}
 
-	/* 暂时注释掉地面站禁飞区接收，当前不接地面站，只测树莓派坐标
-	// 读取地面站禁飞区数据（逐个接收，每帧2字节：x,y）
-	static u8 gs_data[10];
-	static u8 barrier_idx = 0;
-	if (barrier_idx < BARRIER_COUNT && GS_GetData_Flag())
+	/* 读取地面站禁飞区数据（一帧6字节：A1,B1,A2,B2,A3,B3） */
+	if (!gs_barrier_received && GS_GetData_Flag())
 	{
 		GS_GetData(gs_data);
 
-		// 坐标转换：屏发的是1-based坐标
-		// x: 从右到左 1~9（A9=1, A1=9）
-		// y: 从下到上 1~7（B1=1, B7=7）
-		// 飞控内部用0-based: row=y-1, col=x-1
-		u8 x = gs_data[0];
-		u8 y = gs_data[1];
-		if (x >= 1 && x <= 9 && y >= 1 && y <= 7)
+		// 坐标转换：地面端发的是1-based坐标
+		// A: 列号(1-9)，B: 行号(1-7)
+		// barriers[].row = B，barriers[].col = A
+		u8 a1 = gs_data[0], b1 = gs_data[1];
+		u8 a2 = gs_data[2], b2 = gs_data[3];
+		u8 a3 = gs_data[4], b3 = gs_data[5];
+
+		u8 valid = 1;
+		if (a1 < 1 || a1 > 9 || b1 < 1 || b1 > 7) valid = 0;
+		if (a2 < 1 || a2 > 9 || b2 < 1 || b2 > 7) valid = 0;
+		if (a3 < 1 || a3 > 9 || b3 < 1 || b3 > 7) valid = 0;
+
+		if (valid)
 		{
-			barriers[barrier_idx].row = y - 1;
-			barriers[barrier_idx].col = x - 1;
-			barrier_idx++;
-
-			// 回传当前已接收的禁飞区数量给地面站
-			u8 ack = barrier_idx;
+			barriers[0].row = b1; barriers[0].col = a1;
+			barriers[1].row = b2; barriers[1].col = a2;
+			barriers[2].row = b3; barriers[2].col = a3;
+			gs_barrier_received = 1;
+			// 回传确认标志给地面站（0xFF表示已接收）
+			u8 ack = 0xFF;
 			DrvUart2SendBuf(&ack, 1);
-
-			if (barrier_idx >= BARRIER_COUNT)
-			{
-				run_path_planner();
-				// 规划完成后不清零，防止飞行中被覆盖
-			}
 		}
 	}
-	*/
 
 	UserTask_OneKeyCmd();
 	//////////////////////////////////////////////////////////////////////
 }
 
+u8 GS_Barrier_Received(void)
+{
+	return gs_barrier_received;
+}
+
 static void Loop_20Hz(void) //50ms执行一次
 {
-	// 每200ms发送一帧定长二进制调试数据，避免TxBuffer溢出和帧错位
-	static u8 print_cnt = 0;
-	if (++print_cnt >= 4)  // 50ms * 4 = 200ms
-	{
-		print_cnt = 0;
-		u8 buf[12];
-		buf[0] = 0xAA;                  // 帧头1
-		buf[1] = 0x55;                  // 帧头2
-		buf[2] = (u8)(now_x >> 8);     // now_x 高8位
-		buf[3] = (u8)(now_x);           // now_x 低8位
-		buf[4] = (u8)(now_y >> 8);     // now_y 高8位
-		buf[5] = (u8)(now_y);           // now_y 低8位
-		buf[6] = (u8)(rt_tar.st_data.vel_x >> 8);  // vel_x 高8位
-		buf[7] = (u8)(rt_tar.st_data.vel_x);       // vel_x 低8位
-		buf[8] = (u8)(rt_tar.st_data.vel_y >> 8);  // vel_y 高8位
-		buf[9] = (u8)(rt_tar.st_data.vel_y);       // vel_y 低8位
-		buf[10] = 0x0D;                 // 帧尾1
-		buf[11] = 0x0A;                 // 帧尾2
-		DrvUart2SendBuf(buf, 12);
-	}
 }
 
 static void Loop_2Hz(void) //500ms执行一次

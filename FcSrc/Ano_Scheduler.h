@@ -12,5 +12,8 @@ uint32_t last_run;
 void Scheduler_Setup(void);
 void Scheduler_Run(void);
 
+/* 查询飞控是否已收到地面站3个禁飞区坐标 */
+u8 GS_Barrier_Received(void);
+
 #endif
 
