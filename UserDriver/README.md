@@ -108,6 +108,7 @@ SLAM_OK,X=-123,Y=456
 UserDriver/
 ├── Usart2.c / Usart2.h     # USART2 驱动 —— 地面站 DL20 无线串口通信
 ├── Usart3_Pi.c / Usart3_Pi.h  # USART3 驱动 —— 树莓派 SLAM 定位数据接收
+├── Usart1debug.c / Usart1debug.h  # USART1 调试输出 —— 打印SLAM坐标
 └── README.md               # 本说明文件
 
 FcSrc/

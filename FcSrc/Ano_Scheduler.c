@@ -10,43 +10,16 @@
 #include "Path_Planning.h"
 #include "Usart2.h"
 #include "Usart3_Pi.h"
+#include "Usart1debug.h"
 #include "Drv_Uart.h"
 #include "ANO_LX.h"
-#include <stdio.h>
 //////////////////////////////////////////////////////////////////////
 //用户程序调度器
 //////////////////////////////////////////////////////////////////////
 
-#define SLAM_UART1_DEBUG 1
-
 /* 禁飞区接收状态（文件级变量，供 GS_Barrier_Received() 供 User_Task.c 查询） */
 static u8 gs_barrier_received = 0;
 static u8 gs_data[10];
-
-/**
- * @brief 通过USART1打印一帧已通过CRC校验的SLAM坐标
- * @note  输出格式：SLAM_OK,X=-123,Y=456\r\n
- */
-static void SLAM_Uart1_Debug_Send(s16 x, s16 y)
-{
-#if SLAM_UART1_DEBUG
-	char debug_buf[32];
-	int debug_len = snprintf(debug_buf, sizeof(debug_buf),
-							 "SLAM_OK,X=%d,Y=%d\r\n", (int)x, (int)y);
-
-	if (debug_len > 0)
-	{
-		if (debug_len >= sizeof(debug_buf))
-		{
-			debug_len = sizeof(debug_buf) - 1;
-		}
-		DrvUart1SendBuf((u8 *)debug_buf, (u8)debug_len);
-	}
-#else
-	(void)x;
-	(void)y;
-#endif
-}
 
 static void Loop_1000Hz(void) //1ms执行一次
 {
@@ -85,7 +58,7 @@ static void Loop_50Hz(void) //20ms执行一次
 		Pi_GetData(pi_data);
 		now_x = (s16)((pi_data[0] << 8) | pi_data[1]);
 		now_y = (s16)((pi_data[2] << 8) | pi_data[3]);
-		SLAM_Uart1_Debug_Send(now_x, now_y);
+		Usart1Debug_SendSlamCoordinate(now_x, now_y);
 	}
 
 	/* 读取地面站禁飞区数据（一帧6字节：A1,B1,A2,B2,A3,B3） */
