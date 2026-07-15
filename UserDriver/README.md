@@ -17,6 +17,7 @@
 | 外设 | 串口 | 用途 |
 |------|------|------|
 | 树莓派 (Raspberry Pi) | USART3 | 接收 SLAM/N10P 雷达定位数据（`now_x`, `now_y`） |
+| USB-TTL 调试器 | USART1 TX（PA9） | 输出通过CRC校验的树莓派坐标 |
 | 无线串口模块 DL20 | USART2 | 地面站通信（当前未使用，仅保留接口） |
 
 ---
@@ -41,7 +42,7 @@ CRC采用 **CRC16-CCITT-FALSE**：初值 `0xFFFF`，多项式 `0x1021`，不反�
 **数据消费位置：** `Ano_Scheduler.c` 的 `Loop_50Hz()` 中，每隔 20ms 读取一次，更新全局变量 `now_x`、`now_y`。  
 **当前用途：** 更新 `now_x`、`now_y`，暂未参与飞行控制闭环。
 
-调试阶段每收到一帧通过CRC校验的坐标，飞控会通过USART2以115200波特率输出一行ASCII文本：
+调试阶段每收到一帧通过CRC校验的坐标，飞控会通过USART1 TX（PA9）以115200波特率输出一行ASCII文本：
 
 ```text
 SLAM_OK,X=-123,Y=456
