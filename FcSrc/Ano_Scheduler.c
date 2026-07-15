@@ -105,7 +105,7 @@ static void Loop_20Hz(void) //50ms执行一次
 
 static void Loop_2Hz(void) //500ms执行一次
 {
-	
+	Usart1Debug_TestTask();
 }
 //////////////////////////////////////////////////////////////////////
 //调度器初始化

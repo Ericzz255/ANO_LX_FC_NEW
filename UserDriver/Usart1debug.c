@@ -31,3 +31,22 @@ void Usart1Debug_SendSlamCoordinate(s16 x, s16 y)
 	(void)y;
 #endif
 }
+
+void Usart1Debug_TestTask(void)
+{
+#if USART1_DEBUG_SELF_TEST
+	static u32 test_count = 0;
+	char debug_buf[USART1_DEBUG_BUFFER_SIZE];
+	int debug_len = snprintf(debug_buf, sizeof(debug_buf),
+							 "UART1_TEST,COUNT=%lu\r\n", (unsigned long)test_count++);
+
+	if (debug_len > 0)
+	{
+		if (debug_len >= sizeof(debug_buf))
+		{
+			debug_len = sizeof(debug_buf) - 1;
+		}
+		DrvUart1SendBuf((u8 *)debug_buf, (u8)debug_len);
+	}
+#endif
+}
