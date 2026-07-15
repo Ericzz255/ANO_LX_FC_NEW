@@ -4,7 +4,7 @@
 #include "McuConfig.h"
 
 /* USART1链路自检开关：1=每500ms输出测试帧，0=关闭。 */
-#define USART1_DEBUG_SELF_TEST 1
+#define USART1_DEBUG_SELF_TEST 0
 
 /**
  * @brief 初始化USART1调试输出（PA9 TX，115200，8N1）
