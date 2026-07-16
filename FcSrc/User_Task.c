@@ -19,7 +19,11 @@
 #include "ANO_LX.h"
 #include "LX_FC_State.h"
 #include "Ano_Scheduler.h"
+#include "Highcontroll.h"
 #include "Usart2.h"
+
+#define MISSION_HEIGHT_CM          110U
+#define HEIGHT_HOLD_START_DELAY_MS 3000U
 
 /**
  * @brief  当前飞机水平位置（由树莓派 SLAM 通过 USART3 实时更新）
@@ -46,9 +50,9 @@ s16 now_y = 0;
  *           case 3 : 延时 2s，等待解锁稳定
  *           case 4 : 等待地面站发送3个禁飞区坐标 (GS_Barrier_Received())
  *           case 5 : 等待地面站按下路径规划按钮 (GS_PlanCmd_Received())
- *           case 6 : 一键起飞到 110cm (OneKey_Takeoff(110))
- *           case 7 : 悬停稳定 4s
- *           case 8 : 航点跟踪：按规划路径逐格移动（内含子状态机 move_sub_step）
+ *           case 6 : 一键起飞到 MISSION_HEIGHT_CM
+ *           case 7 : 悬停稳定 4s，末段接管高度闭环
+ *           case 8 : 航点跟踪并持续高度闭环（内含子状态机 move_sub_step）
  *           case 9 : 降落 (OneKey_Land())
  *
  *         【case 8 子状态机】（move_sub_step）：
@@ -160,13 +164,23 @@ void UserTask_OneKeyCmd(void)
 
             case 6:
             {
-                mission_step += OneKey_Takeoff(110);
+                mission_step += OneKey_Takeoff(MISSION_HEIGHT_CM);
             }
             break;
 
             case 7:
             {
                 delay_cnt_ms += 20;
+
+                /*
+                 * 先让一键起飞控制完成主要爬升，再由用户高度外环平滑接管。
+                 * 参考工程直接调用 alt_hold()，这里增加了接管延时和传感器保护。
+                 */
+                if (delay_cnt_ms >= HEIGHT_HOLD_START_DELAY_MS)
+                {
+                    HeightControl_Update((float)MISSION_HEIGHT_CM);
+                }
+
                 if (delay_cnt_ms >= 4000)
                 {
                     delay_cnt_ms = 0;
@@ -177,6 +191,8 @@ void UserTask_OneKeyCmd(void)
 
             case 8:
             {
+                HeightControl_Update((float)MISSION_HEIGHT_CM);
+
                 if (wp_idx < final_path_length - 1)
                 {
                     if (move_sub_step == 0)
@@ -225,6 +241,7 @@ void UserTask_OneKeyCmd(void)
 
             case 9:
             {
+                HeightControl_Reset();
                 mission_step += OneKey_Land();
             }
             break;
@@ -237,7 +254,7 @@ void UserTask_OneKeyCmd(void)
         {
             rt_tar.st_data.vel_x = 0;
             rt_tar.st_data.vel_y = 0;
-            rt_tar.st_data.vel_z = 0;
+            HeightControl_Reset();
 
             mission_step = 0;
             delay_cnt_ms = 0;
@@ -250,7 +267,7 @@ void UserTask_OneKeyCmd(void)
     {
         rt_tar.st_data.vel_x = 0;
         rt_tar.st_data.vel_y = 0;
-        rt_tar.st_data.vel_z = 0;
+        HeightControl_Reset();
 
         mission_step = 0;
         one_key_mission_f = 0;

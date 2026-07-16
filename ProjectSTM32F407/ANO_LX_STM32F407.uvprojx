@@ -416,6 +416,16 @@
               <FilePath>..\FcSrc\User_Task.h</FilePath>
             </File>
             <File>
+              <FileName>Highconrtroll.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\FcSrc\Highconrtroll.c</FilePath>
+            </File>
+            <File>
+              <FileName>Highcontroll.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\FcSrc\Highcontroll.h</FilePath>
+            </File>
+            <File>
               <FileName>ANO_DT_LX.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\FcSrc\ANO_DT_LX.c</FilePath>
