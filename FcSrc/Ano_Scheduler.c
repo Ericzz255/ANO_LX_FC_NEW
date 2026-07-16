@@ -11,6 +11,7 @@
 #include "Usart2.h"
 #include "Usart3_Pi.h"
 #include "Usart1debug.h"
+#include "UserDataTransfer.h"
 #include "Drv_Uart.h"
 #include "ANO_LX.h"
 //////////////////////////////////////////////////////////////////////
@@ -101,6 +102,7 @@ u8 GS_Barrier_Received(void)
 
 static void Loop_20Hz(void) //50ms执行一次
 {
+	UserDataTransfer_Task();
 }
 
 static void Loop_2Hz(void) //500ms执行一次

@@ -15,6 +15,7 @@
 #include "ANO_LX.h"
 #include "LX_FC_State.h"
 #include "Highcontroll.h"
+#include "UserDataTransfer.h"
 
 #define MISSION_HEIGHT_CM          50U
 #define HEIGHT_HOLD_START_DELAY_MS 3000U
@@ -62,6 +63,8 @@ void UserTask_OneKeyCmd(void)
     static u8 one_key_mission_f = 0;
     static u8 mission_step = 0;
     static u16 delay_cnt_ms = 0;
+
+    UserDataTransfer_SetTargetHeight(MISSION_HEIGHT_CM);
 
     if (rc_in.fail_safe == 0)
     {
