@@ -1,28 +1,22 @@
 /**
  * @file    User_Task.c
- * @brief   一键程控任务状态机
- * @details 本文件为无人机网格巡航任务的程控状态机，由遥控器 CH6 高位触发，
- *          自动完成起飞、路径规划、逐格移动和降落流程。
- *
- * @author  Eric2195
- * @version 当前版本：Horizontal_Move 固定时间版（2026-05-21）
+ * @brief   模式2高度闭环测试状态机
+ * @details CH6高位启动测试：切换定点模式、解锁、一键起飞，然后使用0x41实时
+ *          控制帧的vel_z测试激光高度闭环。当前不执行路径规划和水平移动。
  *
  * @硬件平台  匿名科创凌霄飞控 ANO_LX_FC (STM32F407)
- * @遥控通道  CH6 高位(>1800): 启动任务  |  中位: 取消/复位  |  低位(<1200): 一键降落
+ * @遥控通道  CH5中位: 保持模式2
+ *             CH6高位: 启动测试 | CH6中位: 取消/复位 | CH6低位: 一键降落
  */
 
 #include "User_Task.h"
-#include "Path_Planning.h"
 #include "Drv_RcIn.h"
 #include "LX_FC_Fun.h"
-#include "Ano_Math.h"
 #include "ANO_LX.h"
 #include "LX_FC_State.h"
-#include "Ano_Scheduler.h"
 #include "Highcontroll.h"
-#include "Usart2.h"
 
-#define MISSION_HEIGHT_CM          110U
+#define MISSION_HEIGHT_CM          50U
 #define HEIGHT_HOLD_START_DELAY_MS 3000U
 
 /**
@@ -33,35 +27,34 @@
 s16 now_x = 0;
 s16 now_y = 0;
 
-/*============================ 一键程控任务状态机 ============================*/
+/*============================ 高度闭环测试状态机 ============================*/
 /**
- * @brief  一键程控任务主状态机
+ * @brief  模式2高度闭环测试
  * @note   【调用周期】：20ms（由 Ano_Scheduler.c 的 Loop_50Hz 调用）
  *
- *         【触发方式】（看遥控器 CH6 通道值）：
+ *         【测试前要求】：
+ *           - CH5必须保持中位，使RC_Data_Task持续选择模式2；
+ *           - 遥控器前4通道保持中位，特别是油门通道不能拉低；
+ *           - 光流与激光高度数据必须有效。
+ *
+ *         【CH6触发方式】：
  *           - CH6 低位 (800~1200) : 一键降落（独立逻辑，随时可用）
  *           - CH6 中位 (1200~1800): 取消任务，清零速度，复位所有状态
- *           - CH6 高位 (1800~2200): 启动任务流程
+ *           - CH6 高位 (1800~2200): 启动高度闭环测试
  *
- *         【任务主流程】（mission_step 状态机）：
+ *         【测试流程】（mission_step状态机）：
  *           case 0 : 空闲/复位状态
- *           case 1 : 切换为程控模式 (LX_Change_Mode(3))
+ *           case 1 : 切换为定点模式 (LX_Change_Mode(2))
  *           case 2 : 解锁电机 (FC_Unlock())
  *           case 3 : 延时 2s，等待解锁稳定
- *           case 4 : 等待地面站发送3个禁飞区坐标 (GS_Barrier_Received())
- *           case 5 : 等待地面站按下路径规划按钮 (GS_PlanCmd_Received())
- *           case 6 : 一键起飞到 MISSION_HEIGHT_CM
- *           case 7 : 悬停稳定 4s，末段接管高度闭环
- *           case 8 : 航点跟踪并持续高度闭环（内含子状态机 move_sub_step）
- *           case 9 : 降落 (OneKey_Land())
- *
- *         【case 8 子状态机】（move_sub_step）：
- *           sub_step 0 : 计算下一格方向，发送 Horizontal_Move 指令
- *           sub_step 1 : 等待移动完成（固定6s），随后进入下一格
+ *           case 4 : 一键起飞到 MISSION_HEIGHT_CM
+ *           case 5 : 等待起飞，3s后高度闭环开始接管
+ *           case 6 : 持续高度闭环，保持 MISSION_HEIGHT_CM
  *
  *         【安全保护】：
  *           - CH6 中位：立即清零 vel_x/vel_y/vel_z，重置所有状态
  *           - 失控保护(fail_safe)：遥控器信号丢失，同样清零并复位
+ *           - 实际模式不是模式2时：停止实时速度输出
  */
 void UserTask_OneKeyCmd(void)
 {
@@ -69,9 +62,6 @@ void UserTask_OneKeyCmd(void)
     static u8 one_key_mission_f = 0;
     static u8 mission_step = 0;
     static u16 delay_cnt_ms = 0;
-    static u8 wp_idx = 0;
-    static u8 move_sub_step = 0;
-    static u16 move_wait_ms = 0;
 
     if (rc_in.fail_safe == 0)
     {
@@ -113,13 +103,21 @@ void UserTask_OneKeyCmd(void)
 
             case 1:
             {
-                mission_step += LX_Change_Mode(3);
+                mission_step += LX_Change_Mode(2);
             }
             break;
 
             case 2:
             {
-                mission_step += FC_Unlock();
+                /* 等待飞控状态帧确认已进入模式2，再发送解锁命令。 */
+                if (fc_sta.fc_mode_sta == 2)
+                {
+                    mission_step += FC_Unlock();
+                }
+                else
+                {
+                    LX_Change_Mode(2);
+                }
             }
             break;
 
@@ -136,49 +134,25 @@ void UserTask_OneKeyCmd(void)
 
             case 4:
             {
-                /* 等待地面站发送3个禁飞区坐标 */
-                if (GS_Barrier_Received())
-                {
-                    mission_step++;
-                }
+                mission_step += OneKey_Takeoff(MISSION_HEIGHT_CM);
             }
             break;
 
             case 5:
             {
-                /* 等待地面站发送路径规划触发命令(0x55+0xA1+0x65) */
-                if (GS_PlanCmd_Received())
-                {
-                    run_path_planner();
-                    if (final_path_length > 0)
-                    {
-                        mission_step++;
-                    }
-                    else
-                    {
-                        mission_step = 9; /* 路径规划失败，跳过起飞直接降落 */
-                    }
-                }
-            }
-            break;
-
-            case 6:
-            {
-                mission_step += OneKey_Takeoff(MISSION_HEIGHT_CM);
-            }
-            break;
-
-            case 7:
-            {
                 delay_cnt_ms += 20;
 
-                /*
-                 * 先让一键起飞控制完成主要爬升，再由用户高度外环平滑接管。
-                 * 参考工程直接调用 alt_hold()，这里增加了接管延时和传感器保护。
-                 */
-                if (delay_cnt_ms >= HEIGHT_HOLD_START_DELAY_MS)
+                rt_tar.st_data.vel_x = 0;
+                rt_tar.st_data.vel_y = 0;
+
+                if (delay_cnt_ms >= HEIGHT_HOLD_START_DELAY_MS &&
+                    fc_sta.fc_mode_sta == 2)
                 {
                     HeightControl_Update((float)MISSION_HEIGHT_CM);
+                }
+                else
+                {
+                    HeightControl_Reset();
                 }
 
                 if (delay_cnt_ms >= 4000)
@@ -189,64 +163,25 @@ void UserTask_OneKeyCmd(void)
             }
             break;
 
-            case 8:
+            case 6:
             {
-                HeightControl_Update((float)MISSION_HEIGHT_CM);
+                rt_tar.st_data.vel_x = 0;
+                rt_tar.st_data.vel_y = 0;
 
-                if (wp_idx < final_path_length - 1)
+                if (fc_sta.fc_mode_sta == 2)
                 {
-                    if (move_sub_step == 0)
-                    {
-                        Point cur = final_path[wp_idx];
-                        Point next = final_path[wp_idx + 1];
-                        int dr = next.row - cur.row;
-                        int dc = next.col - cur.col;
-
-                        u16 angle = 0;
-                        if (dr == 1 && dc == 0)
-                            angle = 0;
-                        else if (dr == -1 && dc == 0)
-                            angle = 180;
-                        else if (dr == 0 && dc == 1)
-                            angle = 270;
-                        else if (dr == 0 && dc == -1)
-                            angle = 90;
-
-                        if (Horizontal_Move(GRID_SIZE_CM, 25, angle))
-                        {
-                            move_sub_step = 1;
-                            move_wait_ms = 0;
-                        }
-                    }
-                    else if (move_sub_step == 1)
-                    {
-                        move_wait_ms += 20;
-                        if (move_wait_ms >= 6000)
-                        {
-                            wp_idx++;
-                            move_wait_ms = 0;
-                            move_sub_step = 0;
-                        }
-                    }
+                    HeightControl_Update((float)MISSION_HEIGHT_CM);
                 }
                 else
                 {
-                    wp_idx = 0;
-                    move_sub_step = 0;
-                    move_wait_ms = 0;
-                    mission_step++;
+                    HeightControl_Reset();
                 }
-            }
-            break;
-
-            case 9:
-            {
-                HeightControl_Reset();
-                mission_step += OneKey_Land();
             }
             break;
 
             default:
+                HeightControl_Reset();
+                mission_step = 0;
                 break;
             }
         }
@@ -258,9 +193,6 @@ void UserTask_OneKeyCmd(void)
 
             mission_step = 0;
             delay_cnt_ms = 0;
-            wp_idx = 0;
-            move_sub_step = 0;
-            move_wait_ms = 0;
         }
     }
     else
@@ -272,8 +204,5 @@ void UserTask_OneKeyCmd(void)
         mission_step = 0;
         one_key_mission_f = 0;
         delay_cnt_ms = 0;
-        wp_idx = 0;
-        move_sub_step = 0;
-        move_wait_ms = 0;
     }
 }
