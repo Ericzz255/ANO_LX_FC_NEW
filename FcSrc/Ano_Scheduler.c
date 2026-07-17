@@ -7,6 +7,7 @@
 **********************************************************************************/
 #include "Ano_Scheduler.h"
 #include "User_Task.h"
+#include "HorizontalControl.h"
 #include "Path_Planning.h"
 #include "Usart2.h"
 #include "Usart3_Pi.h"
@@ -57,8 +58,9 @@ static void Loop_50Hz(void) //20ms执行一次
 	if (Pi_GetData_Flag())
 	{
 		Pi_GetData(pi_data);
-		now_x = (s16)((pi_data[0] << 8) | pi_data[1]);
-		now_y = (s16)((pi_data[2] << 8) | pi_data[3]);
+		HorizontalControl_SetPosition(
+			(s16)((pi_data[0] << 8) | pi_data[1]),
+			(s16)((pi_data[2] << 8) | pi_data[3]));
 		Usart1Debug_SendSlamCoordinate(now_x, now_y);
 	}
 

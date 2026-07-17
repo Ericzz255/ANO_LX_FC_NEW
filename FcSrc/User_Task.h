@@ -14,9 +14,6 @@ typedef struct {
     int row, col;
 } Point;
 
-extern s16 now_x;
-extern s16 now_y;
-
 void UserTask_OneKeyCmd(void);
 
 #endif

@@ -485,6 +485,16 @@
               <FileType>5</FileType>
               <FilePath>..\FcSrc\Path_Planning.h</FilePath>
             </File>
+            <File>
+              <FileName>HorizontalControl.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\FcSrc\HorizontalControl.c</FilePath>
+            </File>
+            <File>
+              <FileName>HorizontalControl.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\FcSrc\HorizontalControl.h</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>

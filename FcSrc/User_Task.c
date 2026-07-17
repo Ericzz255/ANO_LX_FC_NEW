@@ -1,8 +1,8 @@
 /**
  * @file    User_Task.c
- * @brief   模式2高度闭环测试状态机
+ * @brief   模式2高度与水平位置闭环测试状态机
  * @details CH6高位启动测试：切换定点模式、解锁、一键起飞，然后使用0x41实时
- *          控制帧的vel_z测试激光高度闭环。当前不执行路径规划和水平移动。
+ *          控制帧的vel_z测试激光高度闭环，并使用SLAM位置生成vel_x/vel_y。
  *
  * @硬件平台  匿名科创凌霄飞控 ANO_LX_FC (STM32F407)
  * @遥控通道  CH5中位: 保持模式2
@@ -12,25 +12,16 @@
 #include "User_Task.h"
 #include "Drv_RcIn.h"
 #include "LX_FC_Fun.h"
-#include "ANO_LX.h"
 #include "LX_FC_State.h"
 #include "Highcontroll.h"
-#include "UserDataTransfer.h"
+#include "HorizontalControl.h"
 
 #define MISSION_HEIGHT_CM          50U
 #define HEIGHT_HOLD_START_DELAY_MS 3000U
 
+/*========================= 高度与水平闭环测试状态机 =========================*/
 /**
- * @brief  当前飞机水平位置（由树莓派 SLAM 通过 USART3 实时更新）
- * @note   单位：厘米。now_x 对应左右方向（飞机左侧为正），
- *         now_y 对应前后方向（机头前方为正）。
- */
-s16 now_x = 0;
-s16 now_y = 0;
-
-/*============================ 高度闭环测试状态机 ============================*/
-/**
- * @brief  模式2高度闭环测试
+ * @brief  模式2高度与水平位置闭环测试
  * @note   【调用周期】：20ms（由 Ano_Scheduler.c 的 Loop_50Hz 调用）
  *
  *         【测试前要求】：
@@ -49,8 +40,8 @@ s16 now_y = 0;
  *           case 2 : 解锁电机 (FC_Unlock())
  *           case 3 : 延时 2s，等待解锁稳定
  *           case 4 : 一键起飞到 MISSION_HEIGHT_CM
- *           case 5 : 等待起飞，3s后高度闭环开始接管
- *           case 6 : 持续高度闭环，保持 MISSION_HEIGHT_CM
+ *           case 5 : 等待起飞，3s后高度与水平闭环开始接管
+ *           case 6 : 持续保持目标高度和起飞前锁定的SLAM水平坐标
  *
  *         【安全保护】：
  *           - CH6 中位：立即清零 vel_x/vel_y/vel_z，重置所有状态
@@ -63,8 +54,6 @@ void UserTask_OneKeyCmd(void)
     static u8 one_key_mission_f = 0;
     static u8 mission_step = 0;
     static u16 delay_cnt_ms = 0;
-
-    UserDataTransfer_SetTargetHeight(MISSION_HEIGHT_CM);
 
     if (rc_in.fail_safe == 0)
     {
@@ -87,6 +76,8 @@ void UserTask_OneKeyCmd(void)
                 one_key_mission_f = 1;
                 mission_step = 1;
                 delay_cnt_ms = 0;
+                HorizontalControl_Reset();
+                HorizontalControl_CaptureTarget();
             }
         }
         else
@@ -145,17 +136,16 @@ void UserTask_OneKeyCmd(void)
             {
                 delay_cnt_ms += 20;
 
-                rt_tar.st_data.vel_x = 0;
-                rt_tar.st_data.vel_y = 0;
-
                 if (delay_cnt_ms >= HEIGHT_HOLD_START_DELAY_MS &&
                     fc_sta.fc_mode_sta == 2)
                 {
                     HeightControl_Update((float)MISSION_HEIGHT_CM);
+                    HorizontalControl_Update();
                 }
                 else
                 {
                     HeightControl_Reset();
+                    HorizontalControl_StopOutput();
                 }
 
                 if (delay_cnt_ms >= 4000)
@@ -168,30 +158,29 @@ void UserTask_OneKeyCmd(void)
 
             case 6:
             {
-                rt_tar.st_data.vel_x = 0;
-                rt_tar.st_data.vel_y = 0;
-
                 if (fc_sta.fc_mode_sta == 2)
                 {
                     HeightControl_Update((float)MISSION_HEIGHT_CM);
+                    HorizontalControl_Update();
                 }
                 else
                 {
                     HeightControl_Reset();
+                    HorizontalControl_Reset();
                 }
             }
             break;
 
             default:
                 HeightControl_Reset();
+                HorizontalControl_Reset();
                 mission_step = 0;
                 break;
             }
         }
         else
         {
-            rt_tar.st_data.vel_x = 0;
-            rt_tar.st_data.vel_y = 0;
+            HorizontalControl_Reset();
             HeightControl_Reset();
 
             mission_step = 0;
@@ -200,8 +189,7 @@ void UserTask_OneKeyCmd(void)
     }
     else
     {
-        rt_tar.st_data.vel_x = 0;
-        rt_tar.st_data.vel_y = 0;
+        HorizontalControl_Reset();
         HeightControl_Reset();
 
         mission_step = 0;
