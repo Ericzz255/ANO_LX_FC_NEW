@@ -347,9 +347,31 @@ static void Add_Send_Data(u8 frame_num, u8 *_cnt, u8 send_buffer[])
 	break;
 	case 0x40: //遥控数据帧
 	{
+		_rc_ch_un rc_to_fc = rc_in.rc_ch;
+
+		/*
+		 * 模式2会直接使用0x40中的原始CH1/CH2进行水平控制。
+		 * 在发送给飞控核心前应用+-100中位死区，避免遥控器中位
+		 * 偏差绕过RC_Data_Task中的死区，持续产生水平移动指令。
+		 * rc_in保留原始值，便于上位机继续观察真实通道中位。
+		 */
+		if (fc_sta.fc_mode_sta == 2)
+		{
+			if (rc_to_fc.st_data.ch_[ch_1_rol] >= 1400 &&
+				rc_to_fc.st_data.ch_[ch_1_rol] <= 1600)
+			{
+				rc_to_fc.st_data.ch_[ch_1_rol] = 1500;
+			}
+			if (rc_to_fc.st_data.ch_[ch_2_pit] >= 1400 &&
+				rc_to_fc.st_data.ch_[ch_2_pit] <= 1600)
+			{
+				rc_to_fc.st_data.ch_[ch_2_pit] = 1500;
+			}
+		}
+
 		for (u8 i = 0; i < 20; i++)
 		{
-			send_buffer[(*_cnt)++] = rc_in.rc_ch.byte_data[i];
+			send_buffer[(*_cnt)++] = rc_to_fc.byte_data[i];
 		}
 	}
 	break;
