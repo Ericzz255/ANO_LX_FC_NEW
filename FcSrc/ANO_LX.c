@@ -123,8 +123,12 @@ static inline void RC_Data_Task(float dT_s)
 		//摇杆数据转换物理控制量
 		//摇杆数据转换到+-500并加死区
 		float tmp_ch_dz[4];
-		tmp_ch_dz[ch_1_rol] = my_deadzone((rc_in.rc_ch.st_data.ch_[ch_1_rol] - 1500), 0, 40);
-		tmp_ch_dz[ch_2_pit] = my_deadzone((rc_in.rc_ch.st_data.ch_[ch_2_pit] - 1500), 0, 40);
+		/*
+		 * CH1/CH2中位死区扩大到+-100，兼容遥控器中位存在一定偏差，
+		 * 避免定点模式下因轻微未回中持续产生水平控制量。
+		 */
+		tmp_ch_dz[ch_1_rol] = my_deadzone((rc_in.rc_ch.st_data.ch_[ch_1_rol] - 1500), 0, 100);
+		tmp_ch_dz[ch_2_pit] = my_deadzone((rc_in.rc_ch.st_data.ch_[ch_2_pit] - 1500), 0, 100);
 		tmp_ch_dz[ch_3_thr] = my_deadzone((rc_in.rc_ch.st_data.ch_[ch_3_thr] - 1500), 0, 80);
 		tmp_ch_dz[ch_4_yaw] = my_deadzone((rc_in.rc_ch.st_data.ch_[ch_4_yaw] - 1500), 0, 80);
 		//准备上锁时，ROL,PIT,YAW无效
