@@ -30,9 +30,9 @@
 void UserDataTransfer_SetTargetHeight(u16 target_height_cm);
 
 /**
- * @brief 向匿名协议发送缓存中填充F1或F2用户自定义数据区。
- * @note  帧头、长度、校验和UART5发送由ANO_DT_LX统一处理。
+ * @brief 组帧并通过UART5发送F1和F2用户自定义数据。
+ * @note  由20Hz调度任务调用。
  */
-void UserDataTransfer_FillPayload(u8 frame_id, u8 *buffer, u8 *cnt);
+void UserDataTransfer_Task(void);
 
 #endif
