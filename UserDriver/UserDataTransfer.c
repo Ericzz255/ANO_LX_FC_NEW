@@ -33,7 +33,7 @@ void UserDataTransfer_SetTargetHeight(u16 target_height_cm)
     user_target_height_cm = target_height_cm;
 }
 
-static void UserDataTransfer_FillPayload(u8 frame_id, u8 *buffer, u8 *cnt)
+static void UserDataTransfer_FillPayload(u8 *buffer, u8 *cnt)
 {
     u16 measured_height_cm;
     s16 height_error_cm;
@@ -50,32 +50,16 @@ static void UserDataTransfer_FillPayload(u8 frame_id, u8 *buffer, u8 *cnt)
     height_error_cm = (s16)((s32)user_target_height_cm -
                             (s32)measured_height_cm);
 
-    if (frame_id == 0xf1)
-    {
-        UserData_PutU16(buffer, cnt, measured_height_cm);
-        UserData_PutU16(buffer, cnt, user_target_height_cm);
-        UserData_PutS16(buffer, cnt, height_error_cm);
-        UserData_PutS16(buffer, cnt, rt_tar.st_data.vel_z);
-        UserData_PutS16(buffer, cnt, fc_vel.st_data.vel_z);
-        UserData_PutS16(buffer, cnt, ano_of.of1_dx);
-        UserData_PutS16(buffer, cnt, ano_of.of1_dy);
-        UserData_PutU8(buffer, cnt, ano_of.of_quality);
-        UserData_PutU8(buffer, cnt, ano_of.of1_sta);
-        UserData_PutU8(buffer, cnt, ano_of.link_sta);
-    }
-    else if (frame_id == 0xf2)
-    {
-        UserData_PutU8(buffer, cnt, ano_of.work_sta);
-        UserData_PutU8(buffer, cnt, fc_sta.fc_mode_sta);
-        UserData_PutU8(buffer, cnt, fc_sta.unlock_sta);
-        UserData_PutU8(buffer, cnt, rc_in.fail_safe);
-        UserData_PutS16(buffer, cnt, rc_in.rc_ch.st_data.ch_[ch_1_rol]);
-        UserData_PutS16(buffer, cnt, rc_in.rc_ch.st_data.ch_[ch_2_pit]);
-        UserData_PutS16(buffer, cnt, rc_in.rc_ch.st_data.ch_[ch_3_thr]);
-        UserData_PutS16(buffer, cnt, rc_in.rc_ch.st_data.ch_[ch_4_yaw]);
-        UserData_PutU8(buffer, cnt, ano_of.alt_update_cnt);
-        UserData_PutU8(buffer, cnt, ano_of.of_update_cnt);
-    }
+    UserData_PutU16(buffer, cnt, measured_height_cm);
+    UserData_PutU16(buffer, cnt, user_target_height_cm);
+    UserData_PutS16(buffer, cnt, height_error_cm);
+    UserData_PutS16(buffer, cnt, rt_tar.st_data.vel_z);
+    UserData_PutS16(buffer, cnt, fc_vel.st_data.vel_z);
+    UserData_PutS16(buffer, cnt, ano_of.of1_dx);
+    UserData_PutS16(buffer, cnt, ano_of.of1_dy);
+    UserData_PutU8(buffer, cnt, ano_of.of_quality);
+    UserData_PutU8(buffer, cnt, fc_sta.fc_mode_sta);
+    UserData_PutS16(buffer, cnt, rc_in.rc_ch.st_data.ch_[ch_3_thr]);
 }
 
 static void UserDataTransfer_SendFrame(u8 frame_id)
@@ -90,7 +74,7 @@ static void UserDataTransfer_SendFrame(u8 frame_id)
     user_data_buffer[cnt++] = frame_id;
     user_data_buffer[cnt++] = 0;
 
-    UserDataTransfer_FillPayload(frame_id, user_data_buffer, &cnt);
+    UserDataTransfer_FillPayload(user_data_buffer, &cnt);
     user_data_buffer[3] = cnt - 4U;
 
     for (i = 0; i < cnt; i++)
@@ -107,5 +91,4 @@ static void UserDataTransfer_SendFrame(u8 frame_id)
 void UserDataTransfer_Task(void)
 {
     UserDataTransfer_SendFrame(0xf1);
-    UserDataTransfer_SendFrame(0xf2);
 }
