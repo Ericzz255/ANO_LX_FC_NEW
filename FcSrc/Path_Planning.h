@@ -9,17 +9,23 @@
 #define MAX_PATH_LENGTH 150
 #define BARRIER_COUNT 3
 
-/* 障碍物列表：barriers[].row=B(行1-7), barriers[].col=A(列1-9) */
+/* barriers[].row=B(1..7), barriers[].col=A(1..9). */
 extern Point barriers[BARRIER_COUNT];
 
-/* 路径规划结果（供状态机读取） */
 extern Point final_path[MAX_PATH_LENGTH];
 extern int final_path_length;
 
-/* 路径规划入口 */
-void run_path_planner(void);
+void generate_barriers(void);
+int snake_tsp(Point order[]);
+int snake_tsp_col(Point order[]);
+int find_shortest_path(Point start, Point end, Point path[], int max_len);
 
-/* 路径步进反馈：将当前路径点索引映射为字符并通过串口2发给地面站 */
+/* Returns 1 only when a bounded route starting at grid(0,0) was produced. */
+u8 run_path_planner(void);
+
+/* grid row -> SLAM +X, grid column -> SLAM +Y, each cell is 50 cm. */
+u8 PathPlanner_PointToSlam(Point point, s16 *x_cm, s16 *y_cm);
+
 void send_step_feedback(int wp_index);
 
 #endif

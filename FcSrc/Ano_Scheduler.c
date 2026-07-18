@@ -19,9 +19,13 @@
 //用户程序调度器
 //////////////////////////////////////////////////////////////////////
 
-/* 禁飞区接收状态（文件级变量，供 GS_Barrier_Received() 供 User_Task.c 查询） */
-static u8 gs_barrier_received = 0;
+#define USE_FIXED_BARRIERS 1
+
+/* Fixed test barriers: A9B3, A8B3 and A7B3. */
+static u8 gs_barrier_received = USE_FIXED_BARRIERS;
+#if !USE_FIXED_BARRIERS
 static u8 gs_data[10];
+#endif
 
 static void Loop_1000Hz(void) //1ms执行一次
 {
@@ -64,8 +68,9 @@ static void Loop_50Hz(void) //20ms执行一次
 		Usart1Debug_SendSlamCoordinate(now_x, now_y);
 	}
 
+#if !USE_FIXED_BARRIERS
 	/* 读取地面站禁飞区数据（一帧6字节：A1,B1,A2,B2,A3,B3） */
-	if (!gs_barrier_received && GS_GetData_Flag())
+	if (GS_GetData_Flag())
 	{
 		GS_GetData(gs_data);
 
@@ -80,8 +85,15 @@ static void Loop_50Hz(void) //20ms执行一次
 		if (a1 < 1 || a1 > 9 || b1 < 1 || b1 > 7) valid = 0;
 		if (a2 < 1 || a2 > 9 || b2 < 1 || b2 > 7) valid = 0;
 		if (a3 < 1 || a3 > 9 || b3 < 1 || b3 > 7) valid = 0;
+		if ((a1 == a2 && b1 == b2) ||
+			(a1 == a3 && b1 == b3) ||
+			(a2 == a3 && b2 == b3)) valid = 0;
 
-		if (valid)
+		/*
+		 * Allow corrected barrier data while the aircraft is still locked.
+		 * Once unlock starts (mission step 4 and later), ignore map changes.
+		 */
+		if (valid && UserTask_GetMissionStep() <= 3)
 		{
 			barriers[0].row = b1; barriers[0].col = a1;
 			barriers[1].row = b2; barriers[1].col = a2;
@@ -92,6 +104,7 @@ static void Loop_50Hz(void) //20ms执行一次
 			DrvUart2SendBuf(&ack, 1);
 		}
 	}
+#endif
 
 	UserTask_OneKeyCmd();
 	//////////////////////////////////////////////////////////////////////

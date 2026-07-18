@@ -18,6 +18,8 @@ extern s16 now_y;
  */
 void HorizontalControl_SetPosition(s16 x_cm, s16 y_cm);
 
+u8 HorizontalControl_HasValidPosition(void);
+
 /**
  * @brief 清除水平闭环状态，并将水平速度目标置零。
  */

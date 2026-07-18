@@ -4,6 +4,7 @@
 #include "Drv_RcIn.h"
 #include "Drv_Uart.h"
 #include "HorizontalControl.h"
+#include "User_Task.h"
 
 #define USER_DATA_DEST_ADDR   HW_ALL
 #define USER_DATA_BUFFER_SIZE 32U
@@ -50,11 +51,18 @@ static void UserDataTransfer_FillPayloadF2(u8 *buffer, u8 *cnt)
     /* 数据位13、14：飞控横滚角、俯仰角，单位0.01度。 */
     UserData_PutS16(buffer, cnt, fc_att.st_data.rol_x100);
     UserData_PutS16(buffer, cnt, fc_att.st_data.pit_x100);
-    /* 数据位15～18：保留。 */
-    UserData_PutS16(buffer, cnt, 0);
-    UserData_PutS16(buffer, cnt, 0);
-    UserData_PutS16(buffer, cnt, 0);
-    UserData_PutS16(buffer, cnt, 0);
+    /* 数据位15：当前路径点索引（从0开始）。 */
+    UserData_PutS16(buffer, cnt,
+                    (s16)UserTask_GetWaypointIndex());
+    /* 数据位16：规划后的完整路径长度。 */
+    UserData_PutS16(buffer, cnt,
+                    (s16)UserTask_GetPathLength());
+    /* 数据位17：任务状态机步骤。 */
+    UserData_PutS16(buffer, cnt,
+                    (s16)UserTask_GetMissionStep());
+    /* 数据位18：任务状态/异常原因。 */
+    UserData_PutS16(buffer, cnt,
+                    (s16)UserTask_GetMissionStatus());
     /* 数据位19、20：遥控器CH1、CH2原始通道值。 */
     UserData_PutS16(buffer, cnt,
                     rc_in.rc_ch.st_data.ch_[ch_1_rol]);

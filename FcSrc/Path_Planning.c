@@ -1,329 +1,266 @@
-/**
- * @file    Path_Planning.c
- * @brief   网格地图路径规划：BFS 最短路径 + 蛇形覆盖遍历
- * @details 场地规格：7 格(纵向) x 9 格(横向)，单格 50cm x 50cm。
- *          包含：建图、可达格收集、蛇形 TSP、BFS 最短路径、路径拼接、厘米坐标转换。
- * @author  张圣开源 
- */
-
-#include "User_Task.h"
 #include "Path_Planning.h"
 #include "Drv_Uart.h"
 
-/* 步进反馈字符集：20个字符循环使用 */
+/*
+ * Ground-station barrier coordinates use A=column(1..9), B=row(1..7).
+ * Internally row increases forward and column increases to the aircraft's
+ * right.  SLAM uses X forward-positive and Y left-positive.
+ */
+
 static const char step_chars[] = "abcde012345678";
-#define STEP_CHAR_COUNT 20
+#define STEP_CHAR_COUNT ((int)(sizeof(step_chars) - 1U))
 
-/**
- * @brief  发送路径步进反馈到地面站
- * @param  wp_index 当前到达的路径点索引
- * @note   发送6字节：0x5A + [步进字符][A值][B值] + 0x5F + 校验和
- *         步进字符从 "abcde012345678" 循环取
- *         A值为列号(1-9)，B值为行号(1-7)
- *         校验和 = 步进字符 + A + B
- */
-void send_step_feedback(int wp_index)
+typedef struct
 {
-    u8 buf[6];
-
-    buf[0] = 0x5A;                    /* 帧头 */
-    buf[1] = step_chars[wp_index % STEP_CHAR_COUNT];  /* 步进字符 */
-
-    Point p = final_path[wp_index];
-    buf[2] = (u8)(COLS - p.col);      /* A(列号1-9) */
-    buf[3] = (u8)(p.row + 1);         /* B(行号1-7) */
-
-    buf[4] = 0x5F;                    /* 帧尾 */
-    buf[5] = buf[1] + buf[2] + buf[3];/* 校验和 */
-
-    DrvUart2SendBuf(buf, 6);
-}
-
-/**
- * @brief  BFS 队列结构体（顺序队列实现）
- * @note   front 指向队头，rear 指向队尾下一个空位。
- *         地图最大 63 格，不会出现满队列越界。
- */
-typedef struct {
     Point data[MAX_CELLS];
-    int front, rear;
+    int front;
+    int rear;
 } Queue;
 
-/* 全局网格地图：1 表示空地，0 表示障碍物 */
 static int grid[ROWS][COLS];
 
-/* 障碍物列表，以 {B, A} 坐标硬编码：row=B(行1-7), col=A(列1-9) */
 Point barriers[BARRIER_COUNT] = {
-    {3, 7},
+    {3, 9},
     {3, 8},
-    {3, 9}
+    {3, 7}
 };
 
-/* 最终拼接完成的逐格路径（供状态机读取） */
 Point final_path[MAX_PATH_LENGTH];
 int final_path_length = 0;
 
-/* 路径规划全局缓冲区（static 避免栈溢出） */
-static Point g_order_row[MAX_CELLS * 2];
-static Point g_order_col[MAX_CELLS * 2];
-static Point g_seg_buffer[MAX_PATH_LENGTH];
+static Point order_row[MAX_CELLS];
+static Point order_col[MAX_CELLS];
+static Point segment_path[MAX_CELLS];
 
-/* 四邻域搜索方向：右、下、左、上 */
-static int directions[4][2] = {{0, 1}, {1, 0}, {0, -1}, {-1, 0}};
+static const int directions[4][2] = {
+    {0, 1},
+    {1, 0},
+    {0, -1},
+    {-1, 0}
+};
 
-/* ---------- 队列操作 ---------- */
-
-/**
- * @brief  初始化队列
- * @param  q  队列指针
- */
-static void init_queue(Queue *q) {
-    q->front = q->rear = 0;
-}
-
-/**
- * @brief  判断队列是否为空
- * @param  q  队列指针
- * @return 1 表示空，0 表示非空
- */
-static int is_queue_empty(Queue *q) {
-    return q->front == q->rear;
-}
-
-/**
- * @brief  入队操作
- * @param  q  队列指针
- * @param  p  待入队坐标
- */
-static void enqueue(Queue *q, Point p) {
-    q->data[q->rear++] = p;
-}
-
-/**
- * @brief  出队操作
- * @param  q  队列指针
- * @return 队头坐标
- */
-static Point dequeue(Queue *q) {
-    return q->data[q->front++];
-}
-
-/* ---------- 辅助函数 ---------- */
-
-/**
- * @brief  检查坐标是否在地图范围内
- * @param  row  行号
- * @param  col  列号
- * @return 1 表示在范围内，0 表示越界
- */
-static int is_valid(int row, int col) {
+static int is_valid(int row, int col)
+{
     return row >= 0 && row < ROWS && col >= 0 && col < COLS;
 }
 
-/**
- * @brief  初始化网格地图，全部设为可通行
- * @note   遍历 grid[ROWS][COLS]，每个元素赋值为 1。
- *         调用后需再执行 generate_barriers() 标记障碍物。
- */
-static void init_grid() {
-    int i, j;
-    for (i = 0; i < ROWS; i++)
-        for (j = 0; j < COLS; j++)
-            grid[i][j] = 1;
+static int point_equal(Point a, Point b)
+{
+    return a.row == b.row && a.col == b.col;
 }
 
-/**
- * @brief  根据硬编码障碍物初始化网格地图
- * @note   先把地图全置 1，再把障碍物位置置 0。
- *         barriers[].row = B(行1-7)，barriers[].col = A(列1-9)
- *         grid_row = B - 1，grid_col = 9 - A
- */
-void generate_barriers() {
-    int i;
-    init_grid();
-    for (i = 0; i < BARRIER_COUNT; i++) {
-        int b_val = barriers[i].row;    // B值(1-7)
-        int a_val = barriers[i].col;    // A值(1-9)
-        int grid_row = b_val - 1;       // grid行 = B - 1
-        int grid_col = COLS - a_val;    // grid列 = 9 - A
-        if (is_valid(grid_row, grid_col))
-            grid[grid_row][grid_col] = 0;
+static void queue_init(Queue *queue)
+{
+    queue->front = 0;
+    queue->rear = 0;
+}
+
+static int queue_empty(const Queue *queue)
+{
+    return queue->front == queue->rear;
+}
+
+static int queue_push(Queue *queue, Point point)
+{
+    if (queue->rear >= MAX_CELLS)
+    {
+        return 0;
     }
+    queue->data[queue->rear++] = point;
+    return 1;
 }
 
-/**
- * @brief  行扫描蛇形 TSP
- * @param  order  输出数组，存放访问顺序
- * @return order 数组的有效长度
- * @note   偶数行从左到右（col 递增），奇数行从右到左（col 递减）。
- *         自动跳过障碍物所在段，适应任意连续障碍物配置。
- */
-int snake_tsp(Point order[]) {
-    int idx = 0;
-    int r, c, s;
-
-    for (r = 0; r < ROWS; r++) {
-        int seg_starts[3];
-        int seg_ends[3];
-        int seg_count = 0;
-        int cur_start = -1;
-
-        for (c = 0; c < COLS; c++) {
-            if (grid[r][c] == 1) {
-                if (cur_start == -1) {
-                    cur_start = c;
-                }
-            } else {
-                if (cur_start != -1) {
-                    seg_starts[seg_count] = cur_start;
-                    seg_ends[seg_count] = c - 1;
-                    seg_count++;
-                    cur_start = -1;
-                }
-            }
-        }
-        if (cur_start != -1) {
-            seg_starts[seg_count] = cur_start;
-            seg_ends[seg_count] = COLS - 1;
-            seg_count++;
-        }
-
-        if (seg_count == 0) {
-            continue;
-        }
-
-        if (r % 2 == 0) {
-            for (s = 0; s < seg_count; s++) {
-                for (c = seg_starts[s]; c <= seg_ends[s]; c++) {
-                    order[idx++] = (Point){r, c};
-                }
-            }
-        } else {
-            for (s = seg_count - 1; s >= 0; s--) {
-                for (c = seg_ends[s]; c >= seg_starts[s]; c--) {
-                    order[idx++] = (Point){r, c};
-                }
-            }
-        }
-    }
-
-    return idx;
+static Point queue_pop(Queue *queue)
+{
+    return queue->data[queue->front++];
 }
 
-/**
- * @brief  列扫描蛇形 TSP
- * @param  order  输出数组，存放列扫描访问顺序
- * @return order 数组有效长度
- * @note   偶数列从上到下（row 递增），奇数列从下到上（row 递减）。
- *         禁飞区为垂直排列时，列扫描路径通常更短。
- */
-int snake_tsp_col(Point order[]) {
-    int idx = 0;
-    int r, c, s;
+static void init_grid(void)
+{
+    int row;
+    int col;
 
-    for (c = 0; c < COLS; c++) {
-        int seg_starts[3];
-        int seg_ends[3];
-        int seg_count = 0;
-        int cur_start = -1;
-
-        for (r = 0; r < ROWS; r++) {
-            if (grid[r][c] == 1) {
-                if (cur_start == -1) {
-                    cur_start = r;
-                }
-            } else {
-                if (cur_start != -1) {
-                    seg_starts[seg_count] = cur_start;
-                    seg_ends[seg_count] = r - 1;
-                    seg_count++;
-                    cur_start = -1;
-                }
-            }
-        }
-        if (cur_start != -1) {
-            seg_starts[seg_count] = cur_start;
-            seg_ends[seg_count] = ROWS - 1;
-            seg_count++;
-        }
-
-        if (seg_count == 0) {
-            continue;
-        }
-
-        if (c % 2 == 0) {
-            for (s = 0; s < seg_count; s++) {
-                for (r = seg_starts[s]; r <= seg_ends[s]; r++) {
-                    order[idx++] = (Point){r, c};
-                }
-            }
-        } else {
-            for (s = seg_count - 1; s >= 0; s--) {
-                for (r = seg_ends[s]; r >= seg_starts[s]; r--) {
-                    order[idx++] = (Point){r, c};
-                }
-            }
-        }
-    }
-
-    return idx;
-}
-
-/**
- * @brief  BFS 寻找两格子间的最短路径
- * @param  start   起点坐标
- * @param  end     终点坐标
- * @param  path    输出数组，存放找到的最短路径
- * @param  max_len path 数组的最大容量
- * @return 路径长度（含起点和终点），不可达返回 0
- * @note   使用 static 数组避免栈溢出。第一次到达终点时即为最短路径。
- */
-int find_shortest_path(Point start, Point end, Point path[], int max_len) {
-    static int visited[ROWS][COLS];
-    static int parent[ROWS][COLS][2];
-    static Queue q;
-    int r, c;
-    for (r = 0; r < ROWS; r++)
-        for (c = 0; c < COLS; c++)
-            visited[r][c] = 0;
-    init_queue(&q);
-    enqueue(&q, start);
-    visited[start.row][start.col] = 1;
-    parent[start.row][start.col][0] = -1;
-    parent[start.row][start.col][1] = -1;
-
-    while (!is_queue_empty(&q)) {
-        Point cur = dequeue(&q);
-        if (cur.row == end.row && cur.col == end.col) {
-            int len = 0;
-            Point t = end;
-            while (t.row != -1 && len < max_len) {
-                path[len++] = t;
-                int pr = parent[t.row][t.col][0];
-                int pc = parent[t.row][t.col][1];
-                t.row = pr; t.col = pc;
-            }
-            if (len >= max_len) return 0;
-            {
-                int i;
-                for (i = 0; i < len / 2; i++) {
-                    Point tmp = path[i];
-                    path[i] = path[len - 1 - i];
-                    path[len - 1 - i] = tmp;
-                }
-            }
-            return len;
-        }
+    for (row = 0; row < ROWS; row++)
+    {
+        for (col = 0; col < COLS; col++)
         {
+            grid[row][col] = 1;
+        }
+    }
+}
+
+void generate_barriers(void)
+{
+    int i;
+
+    init_grid();
+    for (i = 0; i < BARRIER_COUNT; i++)
+    {
+        int grid_row = barriers[i].row - 1;
+        int grid_col = COLS - barriers[i].col;
+
+        if (is_valid(grid_row, grid_col))
+        {
+            grid[grid_row][grid_col] = 0;
+        }
+    }
+}
+
+int snake_tsp(Point order[])
+{
+    int index = 0;
+    int row;
+    int col;
+
+    for (row = 0; row < ROWS; row++)
+    {
+        if ((row & 1) == 0)
+        {
+            for (col = 0; col < COLS; col++)
+            {
+                if (grid[row][col])
+                {
+                    order[index].row = row;
+                    order[index].col = col;
+                    index++;
+                }
+            }
+        }
+        else
+        {
+            for (col = COLS - 1; col >= 0; col--)
+            {
+                if (grid[row][col])
+                {
+                    order[index].row = row;
+                    order[index].col = col;
+                    index++;
+                }
+            }
+        }
+    }
+
+    return index;
+}
+
+int snake_tsp_col(Point order[])
+{
+    int index = 0;
+    int row;
+    int col;
+
+    for (col = 0; col < COLS; col++)
+    {
+        if ((col & 1) == 0)
+        {
+            for (row = 0; row < ROWS; row++)
+            {
+                if (grid[row][col])
+                {
+                    order[index].row = row;
+                    order[index].col = col;
+                    index++;
+                }
+            }
+        }
+        else
+        {
+            for (row = ROWS - 1; row >= 0; row--)
+            {
+                if (grid[row][col])
+                {
+                    order[index].row = row;
+                    order[index].col = col;
+                    index++;
+                }
+            }
+        }
+    }
+
+    return index;
+}
+
+int find_shortest_path(Point start, Point end, Point path[], int max_len)
+{
+    static int visited[ROWS][COLS];
+    static Point parent[ROWS][COLS];
+    static Queue queue;
+    int row;
+    int col;
+
+    if (path == 0 || max_len <= 0 ||
+        !is_valid(start.row, start.col) ||
+        !is_valid(end.row, end.col) ||
+        !grid[start.row][start.col] ||
+        !grid[end.row][end.col])
+    {
+        return 0;
+    }
+
+    for (row = 0; row < ROWS; row++)
+    {
+        for (col = 0; col < COLS; col++)
+        {
+            visited[row][col] = 0;
+            parent[row][col].row = -1;
+            parent[row][col].col = -1;
+        }
+    }
+
+    queue_init(&queue);
+    if (!queue_push(&queue, start))
+    {
+        return 0;
+    }
+    visited[start.row][start.col] = 1;
+
+    while (!queue_empty(&queue))
+    {
+        Point current = queue_pop(&queue);
+        int direction;
+
+        if (point_equal(current, end))
+        {
+            int length = 0;
+            Point trace = end;
             int i;
-            for (i = 0; i < 4; i++) {
-                int nr = cur.row + directions[i][0];
-                int nc = cur.col + directions[i][1];
-                if (is_valid(nr, nc) && !visited[nr][nc] && grid[nr][nc]) {
-                    visited[nr][nc] = 1;
-                    parent[nr][nc][0] = cur.row;
-                    parent[nr][nc][1] = cur.col;
-                    enqueue(&q, (Point){nr, nc});
+
+            while (trace.row >= 0 && trace.col >= 0)
+            {
+                if (length >= max_len)
+                {
+                    return 0;
+                }
+                path[length++] = trace;
+                trace = parent[trace.row][trace.col];
+            }
+
+            for (i = 0; i < length / 2; i++)
+            {
+                Point temp = path[i];
+                path[i] = path[length - 1 - i];
+                path[length - 1 - i] = temp;
+            }
+            return length;
+        }
+
+        for (direction = 0; direction < 4; direction++)
+        {
+            int next_row = current.row + directions[direction][0];
+            int next_col = current.col + directions[direction][1];
+
+            if (is_valid(next_row, next_col) &&
+                !visited[next_row][next_col] &&
+                grid[next_row][next_col])
+            {
+                Point next;
+                next.row = next_row;
+                next.col = next_col;
+                visited[next_row][next_col] = 1;
+                parent[next_row][next_col] = current;
+                if (!queue_push(&queue, next))
+                {
+                    return 0;
                 }
             }
         }
@@ -332,53 +269,124 @@ int find_shortest_path(Point start, Point end, Point path[], int max_len) {
     return 0;
 }
 
-/**
- * @brief  将 TSP 访问顺序拼接为完整逐格路径
- * @param  order  TSP 计算出的访问顺序数组
- * @param  count  order 数组长度
- * @note   对每一对相邻访问点调用 BFS 找出最短路径并拼接。
- *         第 2 段起跳过每段起点（避免重复节点）。
- *         若某段 BFS 失败（不可达），final_path_length 置 0 并返回。
- */
-void build_full_path(Point order[], int count) {
-    int i;
+static int build_full_path(Point order[], int count)
+{
+    int order_index;
+
     final_path_length = 0;
-    for (i = 0; i < count - 1; i++) {
-        Point start = order[i];
-        Point end = order[i + 1];
-        int seg_len = find_shortest_path(start, end, g_seg_buffer, MAX_PATH_LENGTH);
-        int j;
-        if (seg_len == 0) {
+    if (order == 0 || count <= 0)
+    {
+        return 0;
+    }
+
+    final_path[final_path_length++] = order[0];
+
+    for (order_index = 0; order_index < count - 1; order_index++)
+    {
+        int segment_length;
+        int segment_index;
+
+        segment_length = find_shortest_path(order[order_index],
+                                            order[order_index + 1],
+                                            segment_path,
+                                            MAX_CELLS);
+        if (segment_length <= 0)
+        {
             final_path_length = 0;
-            return;
+            return 0;
         }
-        for (j = (i == 0 ? 0 : 1); j < seg_len; j++) {
-            final_path[final_path_length++] = g_seg_buffer[j];
+
+        for (segment_index = 1;
+             segment_index < segment_length;
+             segment_index++)
+        {
+            if (final_path_length >= MAX_PATH_LENGTH)
+            {
+                final_path_length = 0;
+                return 0;
+            }
+            final_path[final_path_length++] = segment_path[segment_index];
         }
     }
+
+    return final_path_length;
 }
 
-/**
- * @brief  路径规划入口函数
- * @note   执行完整规划流程：建图 -> 收集空地 -> 行/列蛇形 TSP -> BFS 拼接 -> 选优 -> 厘米转换。
- *         执行完后 final_path[] 和 final_path_length 即为结果。
- */
-void run_path_planner(void) {
-    int count_row, count_col;
-    int len_row, len_col;
+u8 run_path_planner(void)
+{
+    int row_count;
+    int col_count;
+    int row_length;
+    int col_length;
 
+    final_path_length = 0;
     generate_barriers();
 
-    count_row = snake_tsp(g_order_row);
-    count_col = snake_tsp_col(g_order_col);
-
-    build_full_path(g_order_row, count_row);
-    len_row = final_path_length;
-
-    build_full_path(g_order_col, count_col);
-    len_col = final_path_length;
-
-    if (len_row <= len_col) {
-        build_full_path(g_order_row, count_row);
+    /* The mission origin is grid(0,0); never take off if it is forbidden. */
+    if (!grid[0][0])
+    {
+        return 0;
     }
+
+    row_count = snake_tsp(order_row);
+    col_count = snake_tsp_col(order_col);
+
+    row_length = build_full_path(order_row, row_count);
+    col_length = build_full_path(order_col, col_count);
+
+    if (row_length <= 0 && col_length <= 0)
+    {
+        final_path_length = 0;
+        return 0;
+    }
+
+    if (row_length > 0 && (col_length <= 0 || row_length <= col_length))
+    {
+        if (build_full_path(order_row, row_count) <= 0)
+        {
+            return 0;
+        }
+    }
+    /* Otherwise the column route is already in final_path. */
+
+    if (!point_equal(final_path[0], (Point){0, 0}))
+    {
+        final_path_length = 0;
+        return 0;
+    }
+
+    return 1;
+}
+
+u8 PathPlanner_PointToSlam(Point point, s16 *x_cm, s16 *y_cm)
+{
+    if (x_cm == 0 || y_cm == 0 ||
+        !is_valid(point.row, point.col))
+    {
+        return 0;
+    }
+
+    *x_cm = (s16)(point.row * GRID_SIZE_CM);
+    *y_cm = (s16)(point.col * GRID_SIZE_CM);
+    return 1;
+}
+
+void send_step_feedback(int wp_index)
+{
+    u8 buffer[6];
+    Point point;
+
+    if (wp_index < 0 || wp_index >= final_path_length)
+    {
+        return;
+    }
+
+    point = final_path[wp_index];
+    buffer[0] = 0x5A;
+    buffer[1] = (u8)step_chars[wp_index % STEP_CHAR_COUNT];
+    buffer[2] = (u8)(COLS - point.col);
+    buffer[3] = (u8)(point.row + 1);
+    buffer[4] = 0x5F;
+    buffer[5] = (u8)(buffer[1] + buffer[2] + buffer[3]);
+    DrvUart2SendBuf(buffer, 6);
 }

@@ -1,5 +1,6 @@
 #include "HorizontalControl.h"
 #include "ANO_LX.h"
+#include "Drv_Sys.h"
 #include "LX_FC_State.h"
 
 /*
@@ -15,14 +16,15 @@
 #define HORIZONTAL_HOLD_MAX_VEL_CMPS           15      /* 位置环输出最大速度(cm/s) */
 #define HORIZONTAL_HOLD_MAX_VEL_STEP_CMPS      2       /* 单周期速度增量限幅(cm/s) */
 #define HORIZONTAL_HOLD_SENSOR_TIMEOUT_MS      300U    /* 传感器超时时间(ms) */
-#define HORIZONTAL_HOLD_MAX_ERROR_X_CM         130     /* X轴包含1m航点的误差边界(cm) */
-#define HORIZONTAL_HOLD_MAX_ERROR_Y_CM         50      /* Y轴最大允许位置误差(cm) */
+#define HORIZONTAL_HOLD_MAX_ERROR_X_CM         80      /* 相邻航点50cm，额外保留30cm安全裕量 */
+#define HORIZONTAL_HOLD_MAX_ERROR_Y_CM         80      /* 相邻航点50cm，额外保留30cm安全裕量 */
 #define HORIZONTAL_HOLD_DIVERGENCE_CHECK_MS    1000U   /* 发散检测时间窗(ms) */
 #define HORIZONTAL_HOLD_DIVERGENCE_GROWTH_CM   5       /* 时间窗内允许的误差增长(cm) */
 
 #define HORIZONTAL_HOLD_FAULT_NONE              0U
 #define HORIZONTAL_HOLD_FAULT_MAX_ERROR         1U
 #define HORIZONTAL_HOLD_FAULT_DIVERGENCE        2U
+#define HORIZONTAL_HOLD_FAULT_SENSOR_TIMEOUT    3U
 
 s16 now_x = 0;
 s16 now_y = 0;
@@ -31,6 +33,7 @@ static s16 hold_target_x = 0;
 static s16 hold_target_y = 0;
 static u8 slam_position_update_cnt = 0;
 static u8 slam_position_valid = 0;
+static u32 slam_last_update_ms = 0;
 
 typedef struct
 {
@@ -134,7 +137,19 @@ void HorizontalControl_SetPosition(s16 x_cm, s16 y_cm)
     now_x = x_cm;
     now_y = y_cm;
     slam_position_update_cnt++;
+    slam_last_update_ms = GetSysRunTimeMs();
     slam_position_valid = 1;
+}
+
+u8 HorizontalControl_HasValidPosition(void)
+{
+    if (slam_position_valid == 0)
+    {
+        return 0;
+    }
+
+    return ((u32)(GetSysRunTimeMs() - slam_last_update_ms) <=
+            HORIZONTAL_HOLD_SENSOR_TIMEOUT_MS);
 }
 
 void HorizontalControl_StopOutput(void)
@@ -283,8 +298,8 @@ void HorizontalControl_Update(void)
 
     if (horizontal_control.stale_ms > HORIZONTAL_HOLD_SENSOR_TIMEOUT_MS)
     {
-        horizontal_control.initialized = 0;
-        HorizontalControl_StopOutput();
+        HorizontalControl_LatchFault(
+            HORIZONTAL_HOLD_FAULT_SENSOR_TIMEOUT);
         return;
     }
 
