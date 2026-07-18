@@ -129,7 +129,7 @@ static inline void RC_Data_Task(float dT_s)
 		 */
 		tmp_ch_dz[ch_1_rol] = my_deadzone((rc_in.rc_ch.st_data.ch_[ch_1_rol] - 1500), 0, 100);
 		tmp_ch_dz[ch_2_pit] = my_deadzone((rc_in.rc_ch.st_data.ch_[ch_2_pit] - 1500), 0, 100);
-		tmp_ch_dz[ch_3_thr] = my_deadzone((rc_in.rc_ch.st_data.ch_[ch_3_thr] - 1500), 0, 80);
+		tmp_ch_dz[ch_3_thr] = my_deadzone((rc_in.rc_ch.st_data.ch_[ch_3_thr] - 1500), 0, 100);
 		tmp_ch_dz[ch_4_yaw] = my_deadzone((rc_in.rc_ch.st_data.ch_[ch_4_yaw] - 1500), 0, 80);
 		//准备上锁时，ROL,PIT,YAW无效
 		if (sti_fun.pre_locking)
@@ -145,7 +145,20 @@ static inline void RC_Data_Task(float dT_s)
 //		{		
 			rt_tar.st_data.rol = tmp_ch_dz[ch_1_rol] * 0.00217f * MAX_ANGLE;
 			rt_tar.st_data.pit = -tmp_ch_dz[ch_2_pit] * 0.00217f * MAX_ANGLE;		//因为摇杆俯仰方向和定义的俯仰方向相反，所以取负
-			rt_tar.st_data.thr = (rc_in.rc_ch.st_data.ch_[ch_3_thr] - 1000);		//0.1%
+			/*
+			 * 模式2禁止CH3中位以上产生手动上升控制，避免误触油门。
+			 * 自动起飞和高度闭环使用独立命令/vel_z，不受此限幅影响。
+			 */
+			if (mod_f[0] == 2 &&
+				rc_in.rc_ch.st_data.ch_[ch_3_thr] >= 1400)
+			{
+				rt_tar.st_data.thr = 500;
+			}
+			else
+			{
+				rt_tar.st_data.thr =
+					(rc_in.rc_ch.st_data.ch_[ch_3_thr] - 1000);		//0.1%
+			}
 			rt_tar.st_data.yaw_dps = -tmp_ch_dz[ch_4_yaw] * 0.00238f * MAX_YAW_DPS; //因为摇杆航向方向和定义的航向方向相反，所以取负		
 //		}
 		//############(实时控制帧，自主开发闭环控制，在这里赋值即可)##############
