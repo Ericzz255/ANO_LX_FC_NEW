@@ -33,7 +33,7 @@ static void UserDataTransfer_FillPayloadF1(u8 *buffer, u8 *cnt)
     UserData_PutS16(buffer, cnt, HorizontalControl_GetOutputVelY());
     /*
      * 数据位9：保护状态。
-     * 0=正常，1=位置误差超过50cm，2=误差持续发散。
+     * 0=正常，1=位置误差越界，2=误差持续发散。
      */
     UserData_PutS16(buffer, cnt,
                     (s16)HorizontalControl_GetFaultCode());

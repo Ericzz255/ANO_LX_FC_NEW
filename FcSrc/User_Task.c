@@ -17,6 +17,10 @@
 #include "HorizontalControl.h"
 
 #define MISSION_HEIGHT_CM          50U
+#define MISSION_TARGET_X_CM        100
+#define MISSION_TARGET_Y_CM        0
+#define MISSION_TARGET_TOLERANCE_CM 5
+#define MISSION_TARGET_STABLE_MS   1000U
 #define HEIGHT_HOLD_START_DELAY_MS 3000U
 
 /*========================= 高度与水平闭环测试状态机 =========================*/
@@ -41,7 +45,9 @@
  *           case 3 : 延时 2s，等待解锁稳定
  *           case 4 : 一键起飞到 MISSION_HEIGHT_CM
  *           case 5 : 等待起飞，3s后高度与水平闭环开始接管
- *           case 6 : 持续保持目标高度和起飞前锁定的SLAM水平坐标
+ *           case 6 : 将水平目标设为SLAM绝对坐标(100,0)
+ *           case 7 : 飞向新目标，进入5cm范围并稳定1s
+ *           case 8 : 一键降落
  *
  *         【安全保护】：
  *           - CH6 中位：立即清零 vel_x/vel_y/vel_z，重置所有状态
@@ -52,8 +58,10 @@ void UserTask_OneKeyCmd(void)
 {
     static u8 one_key_land_f = 1;
     static u8 one_key_mission_f = 0;
+    static u8 mission_land_f = 0;
     static u8 mission_step = 0;
     static u16 delay_cnt_ms = 0;
+    static u16 target_stable_cnt_ms = 0;
 
     if (rc_in.fail_safe == 0)
     {
@@ -76,6 +84,8 @@ void UserTask_OneKeyCmd(void)
                 one_key_mission_f = 1;
                 mission_step = 1;
                 delay_cnt_ms = 0;
+                target_stable_cnt_ms = 0;
+                mission_land_f = 0;
                 HorizontalControl_Reset();
                 HorizontalControl_CaptureTarget();
             }
@@ -161,12 +171,65 @@ void UserTask_OneKeyCmd(void)
                 if (fc_sta.fc_mode_sta == 2)
                 {
                     HeightControl_Update((float)MISSION_HEIGHT_CM);
+                    if (HorizontalControl_SetTarget(
+                            MISSION_TARGET_X_CM,
+                            MISSION_TARGET_Y_CM))
+                    {
+                        target_stable_cnt_ms = 0;
+                        mission_step++;
+                    }
                     HorizontalControl_Update();
                 }
                 else
                 {
                     HeightControl_Reset();
                     HorizontalControl_Reset();
+                }
+            }
+            break;
+
+            case 7:
+            {
+                if (fc_sta.fc_mode_sta == 2)
+                {
+                    HeightControl_Update((float)MISSION_HEIGHT_CM);
+                    HorizontalControl_Update();
+
+                    if (HorizontalControl_TargetReached(
+                            MISSION_TARGET_TOLERANCE_CM))
+                    {
+                        if (target_stable_cnt_ms < MISSION_TARGET_STABLE_MS)
+                        {
+                            target_stable_cnt_ms += 20;
+                        }
+                        else
+                        {
+                            target_stable_cnt_ms = 0;
+                            mission_step++;
+                        }
+                    }
+                    else
+                    {
+                        target_stable_cnt_ms = 0;
+                    }
+                }
+                else
+                {
+                    HeightControl_Reset();
+                    HorizontalControl_Reset();
+                    target_stable_cnt_ms = 0;
+                }
+            }
+            break;
+
+            case 8:
+            {
+                HorizontalControl_StopOutput();
+                HeightControl_Reset();
+
+                if (mission_land_f == 0)
+                {
+                    mission_land_f = OneKey_Land();
                 }
             }
             break;
@@ -185,6 +248,8 @@ void UserTask_OneKeyCmd(void)
 
             mission_step = 0;
             delay_cnt_ms = 0;
+            target_stable_cnt_ms = 0;
+            mission_land_f = 0;
         }
     }
     else
@@ -195,5 +260,7 @@ void UserTask_OneKeyCmd(void)
         mission_step = 0;
         one_key_mission_f = 0;
         delay_cnt_ms = 0;
+        target_stable_cnt_ms = 0;
+        mission_land_f = 0;
     }
 }

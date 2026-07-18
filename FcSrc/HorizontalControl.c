@@ -12,10 +12,11 @@
 #define HORIZONTAL_HOLD_KP_Y                   0.40f   /* Y轴位置环P增益 */
 #define HORIZONTAL_HOLD_KD_Y                   0.05f   /* Y轴位置环D增益 */
 #define HORIZONTAL_HOLD_DEADBAND_CM            3       /* 位置死区(cm)，误差小于此值不控 */
-#define HORIZONTAL_HOLD_MAX_VEL_CMPS           10      /* 位置环输出最大速度(cm/s) */
+#define HORIZONTAL_HOLD_MAX_VEL_CMPS           15      /* 位置环输出最大速度(cm/s) */
 #define HORIZONTAL_HOLD_MAX_VEL_STEP_CMPS      2       /* 单周期速度增量限幅(cm/s) */
 #define HORIZONTAL_HOLD_SENSOR_TIMEOUT_MS      300U    /* 传感器超时时间(ms) */
-#define HORIZONTAL_HOLD_MAX_ERROR_CM           50      /* 首次闭环测试最大允许位置误差(cm) */
+#define HORIZONTAL_HOLD_MAX_ERROR_X_CM         130     /* X轴包含1m航点的误差边界(cm) */
+#define HORIZONTAL_HOLD_MAX_ERROR_Y_CM         50      /* Y轴最大允许位置误差(cm) */
 #define HORIZONTAL_HOLD_DIVERGENCE_CHECK_MS    1000U   /* 发散检测时间窗(ms) */
 #define HORIZONTAL_HOLD_DIVERGENCE_GROWTH_CM   5       /* 时间窗内允许的误差增长(cm) */
 
@@ -173,6 +174,35 @@ void HorizontalControl_CaptureTarget(void)
     }
 }
 
+u8 HorizontalControl_SetTarget(s16 target_x_cm, s16 target_y_cm)
+{
+    if (slam_position_valid == 0 ||
+        horizontal_control.initialized == 0 ||
+        horizontal_control.fault_code != HORIZONTAL_HOLD_FAULT_NONE)
+    {
+        return 0;
+    }
+
+    hold_target_x = target_x_cm;
+    hold_target_y = target_y_cm;
+
+    /*
+     * 目标阶跃时同步微分历史值，避免产生微分冲击。
+     * P项和速度斜坡限制仍会平滑地建立前飞速度。
+     */
+    horizontal_control.last_error_x_cm =
+        (s32)hold_target_x - (s32)now_x;
+    horizontal_control.last_error_y_cm =
+        (s32)hold_target_y - (s32)now_y;
+    horizontal_control.divergence_check_ms = 0;
+    horizontal_control.divergence_reference_error_cm =
+        HorizontalControl_MaxAbsError(
+            horizontal_control.last_error_x_cm,
+            horizontal_control.last_error_y_cm);
+
+    return 1;
+}
+
 static void HorizontalControl_LatchFault(u8 fault_code)
 {
     horizontal_control.fault_code = fault_code;
@@ -268,11 +298,11 @@ void HorizontalControl_Update(void)
     forward_error_cm = (s32)hold_target_x - (s32)now_x;
     left_error_cm = (s32)hold_target_y - (s32)now_y;
 
-    /* 首次闭环测试中，误差越界后锁死输出，必须CH6回中复位。 */
+    /* 航点测试中误差越界后锁死输出，必须CH6回中复位。 */
     if (HorizontalControl_AbsS32(forward_error_cm) >
-            HORIZONTAL_HOLD_MAX_ERROR_CM ||
+            HORIZONTAL_HOLD_MAX_ERROR_X_CM ||
         HorizontalControl_AbsS32(left_error_cm) >
-            HORIZONTAL_HOLD_MAX_ERROR_CM)
+            HORIZONTAL_HOLD_MAX_ERROR_Y_CM)
     {
         HorizontalControl_LatchFault(HORIZONTAL_HOLD_FAULT_MAX_ERROR);
         return;
@@ -358,4 +388,28 @@ s16 HorizontalControl_GetOutputVelY(void)
 u8 HorizontalControl_GetFaultCode(void)
 {
     return horizontal_control.fault_code;
+}
+
+u8 HorizontalControl_TargetReached(s16 tolerance_cm)
+{
+    s32 error_x_cm;
+    s32 error_y_cm;
+
+    if (tolerance_cm < 0)
+    {
+        tolerance_cm = -tolerance_cm;
+    }
+
+    if (slam_position_valid == 0 ||
+        horizontal_control.initialized == 0 ||
+        horizontal_control.fault_code != HORIZONTAL_HOLD_FAULT_NONE)
+    {
+        return 0;
+    }
+
+    error_x_cm = (s32)hold_target_x - (s32)now_x;
+    error_y_cm = (s32)hold_target_y - (s32)now_y;
+
+    return (HorizontalControl_AbsS32(error_x_cm) <= tolerance_cm &&
+            HorizontalControl_AbsS32(error_y_cm) <= tolerance_cm);
 }

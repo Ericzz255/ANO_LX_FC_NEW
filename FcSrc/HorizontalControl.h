@@ -1,3 +1,4 @@
+
 #ifndef __HORIZONTAL_CONTROL_H
 #define __HORIZONTAL_CONTROL_H
 
@@ -33,6 +34,12 @@ void HorizontalControl_StopOutput(void);
 void HorizontalControl_CaptureTarget(void);
 
 /**
+ * @brief 设置SLAM坐标系中的绝对水平目标。
+ * @return 1：目标更新成功；0：控制器尚未就绪或已触发故障。
+ */
+u8 HorizontalControl_SetTarget(s16 target_x_cm, s16 target_y_cm);
+
+/**
  * @brief 更新水平位置外环，将位置误差转换为水平速度目标。
  * @note  按20ms（50Hz）调用周期设计。
  */
@@ -48,5 +55,10 @@ s16 HorizontalControl_GetErrorY(void);
 s16 HorizontalControl_GetOutputVelX(void);
 s16 HorizontalControl_GetOutputVelY(void);
 u8 HorizontalControl_GetFaultCode(void);
+
+/**
+ * @brief 判断当前SLAM位置是否进入目标点容差范围。
+ */
+u8 HorizontalControl_TargetReached(s16 tolerance_cm);
 
 #endif
