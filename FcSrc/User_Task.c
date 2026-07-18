@@ -6,21 +6,20 @@
 #include "Path_Planning.h"
 
 #define MISSION_HEIGHT_CM               50U
-#define HEIGHT_HOLD_START_DELAY_MS      3000U
-#define TAKEOFF_STABILIZE_MS            4000U
+#define TAKEOFF_STABILIZE_MS            3000U
 #define WAYPOINT_TOLERANCE_CM           5
 #define WAYPOINT_STABLE_MS              500U
 #define USER_TASK_PERIOD_MS             20U
 
 /*
- * 0 idle
- * 1 send mode 2 command, wait for SLAM and plan the fixed map
- * 2 unlock
- * 3 wait after unlock
- * 4 take off
- * 5 stabilize
- * 6 traverse waypoints
- * 7 land
+ * 0 idle                                   空闲
+ * 1 send mode 2 command, wait for SLAM and plan the fixed map   发送模式2,等待SLAM并规划固定地图
+ * 2 unlock                                 解锁
+ * 3 wait after unlock                      解锁后等待
+ * 4 take off                               起飞
+ * 5 stabilize                              稳定悬停
+ * 6 traverse waypoints                     遍历航点
+ * 7 land                                   降落
  */
 static u8 mission_step = 0;
 static u16 waypoint_index = 0;
@@ -146,16 +145,8 @@ void UserTask_OneKeyCmd(void)
 
     case 5:
         state_timer_ms += USER_TASK_PERIOD_MS;
-        if (state_timer_ms >= HEIGHT_HOLD_START_DELAY_MS)
-        {
-            HeightControl_Update((float)MISSION_HEIGHT_CM);
-            HorizontalControl_Update();
-        }
-        else
-        {
-            HeightControl_Reset();
-            HorizontalControl_StopOutput();
-        }
+        HeightControl_Update((float)MISSION_HEIGHT_CM);
+        HorizontalControl_Update();
 
         /* The remaining horizontal fault is SLAM data timeout. */
         if (HorizontalControl_GetFaultCode() != 0)

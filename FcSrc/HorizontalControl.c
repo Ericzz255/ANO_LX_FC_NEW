@@ -12,7 +12,8 @@
 #define HORIZONTAL_HOLD_KD_X                   0.08f   /* X轴位置环D增益 */
 #define HORIZONTAL_HOLD_KP_Y                   0.40f   /* Y轴位置环P增益 */
 #define HORIZONTAL_HOLD_KD_Y                   0.05f   /* Y轴位置环D增益 */
-#define HORIZONTAL_HOLD_DEADBAND_CM            3       /* 位置死区(cm)，误差小于此值不控 */
+#define HORIZONTAL_HOLD_DEADBAND_CM            5       /* 与航点到达容差统一为5cm */
+#define HORIZONTAL_HOLD_MIN_VEL_CMPS           5       /* 死区外最小有效速度(cm/s) */
 #define HORIZONTAL_HOLD_MAX_VEL_CMPS           15      /* 位置环输出最大速度(cm/s) */
 #define HORIZONTAL_HOLD_MAX_VEL_STEP_CMPS      2       /* 单周期速度增量限幅(cm/s) */
 #define HORIZONTAL_HOLD_SENSOR_TIMEOUT_MS      300U    /* 传感器超时时间(ms) */
@@ -71,6 +72,16 @@ static s16 HorizontalControl_LimitVelocity(float velocity_cmps)
     else if (velocity_cmps < -HORIZONTAL_HOLD_MAX_VEL_CMPS)
     {
         velocity_cmps = -HORIZONTAL_HOLD_MAX_VEL_CMPS;
+    }
+    else if (velocity_cmps > 0.0f &&
+             velocity_cmps < HORIZONTAL_HOLD_MIN_VEL_CMPS)
+    {
+        velocity_cmps = HORIZONTAL_HOLD_MIN_VEL_CMPS;
+    }
+    else if (velocity_cmps < 0.0f &&
+             velocity_cmps > -HORIZONTAL_HOLD_MIN_VEL_CMPS)
+    {
+        velocity_cmps = -HORIZONTAL_HOLD_MIN_VEL_CMPS;
     }
 
     if (velocity_cmps >= 0.0f)
