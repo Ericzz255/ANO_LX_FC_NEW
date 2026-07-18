@@ -8,7 +8,6 @@
 #define MISSION_HEIGHT_CM               50U
 #define TAKEOFF_STABILIZE_MS            3000U
 #define WAYPOINT_TOLERANCE_CM           5
-#define WAYPOINT_STABLE_MS              500U
 #define USER_TASK_PERIOD_MS             20U
 
 /*
@@ -61,7 +60,6 @@ void UserTask_OneKeyCmd(void)
 {
     static u8 land_command_sent = 0;
     static u16 state_timer_ms = 0;
-    static u16 waypoint_stable_ms = 0;
     u16 ch6 = rc_in.rc_ch.st_data.ch_[ch_6_aux2];
 
     if (rc_in.fail_safe != 0)
@@ -69,7 +67,6 @@ void UserTask_OneKeyCmd(void)
         UserTask_ResetMission();
         land_command_sent = 0;
         state_timer_ms = 0;
-        waypoint_stable_ms = 0;
         return;
     }
 
@@ -86,7 +83,6 @@ void UserTask_OneKeyCmd(void)
         waypoint_index = 0;
         waypoint_target_loaded = 0;
         state_timer_ms = 0;
-        waypoint_stable_ms = 0;
         return;
     }
 
@@ -96,7 +92,6 @@ void UserTask_OneKeyCmd(void)
         UserTask_ResetMission();
         land_command_sent = 0;
         state_timer_ms = 0;
-        waypoint_stable_ms = 0;
         return;
     }
 
@@ -106,7 +101,6 @@ void UserTask_OneKeyCmd(void)
         mission_step = 1;
         land_command_sent = 0;
         state_timer_ms = 0;
-        waypoint_stable_ms = 0;
     }
 
     switch (mission_step)
@@ -158,7 +152,6 @@ void UserTask_OneKeyCmd(void)
             state_timer_ms = 0;
             waypoint_index = 0;
             waypoint_target_loaded = 0;
-            waypoint_stable_ms = 0;
             mission_step = 6;
         }
         break;
@@ -188,7 +181,6 @@ void UserTask_OneKeyCmd(void)
                 HorizontalControl_SetTarget(target_x_cm, target_y_cm))
             {
                 waypoint_target_loaded = 1;
-                waypoint_stable_ms = 0;
             }
         }
 
@@ -197,22 +189,9 @@ void UserTask_OneKeyCmd(void)
 
         if (HorizontalControl_TargetReached(WAYPOINT_TOLERANCE_CM))
         {
-            if (waypoint_stable_ms < WAYPOINT_STABLE_MS)
-            {
-                waypoint_stable_ms += USER_TASK_PERIOD_MS;
-            }
-
-            if (waypoint_stable_ms >= WAYPOINT_STABLE_MS)
-            {
-                send_step_feedback((int)waypoint_index);
-                waypoint_index++;
-                waypoint_target_loaded = 0;
-                waypoint_stable_ms = 0;
-            }
-        }
-        else
-        {
-            waypoint_stable_ms = 0;
+            send_step_feedback((int)waypoint_index);
+            waypoint_index++;
+            waypoint_target_loaded = 0;
         }
     }
     break;
@@ -229,7 +208,6 @@ void UserTask_OneKeyCmd(void)
     default:
         UserTask_ResetMission();
         state_timer_ms = 0;
-        waypoint_stable_ms = 0;
         land_command_sent = 0;
         break;
     }
