@@ -32,10 +32,7 @@ static void UserDataTransfer_FillPayloadF1(u8 *buffer, u8 *cnt)
     /* 数据位7、8：实际发送的水平速度目标，单位cm/s。 */
     UserData_PutS16(buffer, cnt, HorizontalControl_GetOutputVelX());
     UserData_PutS16(buffer, cnt, HorizontalControl_GetOutputVelY());
-    /*
-     * 数据位9：保护状态。
-     * 0=正常，1=位置误差越界，2=误差持续发散。
-     */
+    /* 数据位9：0=正常，1=SLAM数据超时。 */
     UserData_PutS16(buffer, cnt,
                     (s16)HorizontalControl_GetFaultCode());
     /* 数据位10：飞控内部估计的X水平速度，单位cm/s。 */
@@ -60,9 +57,8 @@ static void UserDataTransfer_FillPayloadF2(u8 *buffer, u8 *cnt)
     /* 数据位17：任务状态机步骤。 */
     UserData_PutS16(buffer, cnt,
                     (s16)UserTask_GetMissionStep());
-    /* 数据位18：任务状态/异常原因。 */
-    UserData_PutS16(buffer, cnt,
-                    (s16)UserTask_GetMissionStatus());
+    /* 数据位18：保留。 */
+    UserData_PutS16(buffer, cnt, 0);
     /* 数据位19、20：遥控器CH1、CH2原始通道值。 */
     UserData_PutS16(buffer, cnt,
                     rc_in.rc_ch.st_data.ch_[ch_1_rol]);

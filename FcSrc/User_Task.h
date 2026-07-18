@@ -20,7 +20,6 @@ typedef struct
 void UserTask_OneKeyCmd(void);
 
 u8 UserTask_GetMissionStep(void);
-u8 UserTask_GetMissionStatus(void);
 u16 UserTask_GetWaypointIndex(void);
 u16 UserTask_GetPathLength(void);
 

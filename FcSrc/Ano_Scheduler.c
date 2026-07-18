@@ -8,24 +8,13 @@
 #include "Ano_Scheduler.h"
 #include "User_Task.h"
 #include "HorizontalControl.h"
-#include "Path_Planning.h"
-#include "Usart2.h"
 #include "Usart3_Pi.h"
 #include "Usart1debug.h"
 #include "UserDataTransfer.h"
-#include "Drv_Uart.h"
 #include "ANO_LX.h"
 //////////////////////////////////////////////////////////////////////
 //用户程序调度器
 //////////////////////////////////////////////////////////////////////
-
-#define USE_FIXED_BARRIERS 1
-
-/* Fixed test barriers: A9B3, A8B3 and A7B3. */
-static u8 gs_barrier_received = USE_FIXED_BARRIERS;
-#if !USE_FIXED_BARRIERS
-static u8 gs_data[10];
-#endif
 
 static void Loop_1000Hz(void) //1ms执行一次
 {
@@ -68,51 +57,8 @@ static void Loop_50Hz(void) //20ms执行一次
 		Usart1Debug_SendSlamCoordinate(now_x, now_y);
 	}
 
-#if !USE_FIXED_BARRIERS
-	/* 读取地面站禁飞区数据（一帧6字节：A1,B1,A2,B2,A3,B3） */
-	if (GS_GetData_Flag())
-	{
-		GS_GetData(gs_data);
-
-		// 坐标转换：地面端发的是1-based坐标
-		// A: 列号(1-9)，B: 行号(1-7)
-		// barriers[].row = B，barriers[].col = A
-		u8 a1 = gs_data[0], b1 = gs_data[1];
-		u8 a2 = gs_data[2], b2 = gs_data[3];
-		u8 a3 = gs_data[4], b3 = gs_data[5];
-
-		u8 valid = 1;
-		if (a1 < 1 || a1 > 9 || b1 < 1 || b1 > 7) valid = 0;
-		if (a2 < 1 || a2 > 9 || b2 < 1 || b2 > 7) valid = 0;
-		if (a3 < 1 || a3 > 9 || b3 < 1 || b3 > 7) valid = 0;
-		if ((a1 == a2 && b1 == b2) ||
-			(a1 == a3 && b1 == b3) ||
-			(a2 == a3 && b2 == b3)) valid = 0;
-
-		/*
-		 * Allow corrected barrier data while the aircraft is still locked.
-		 * Once unlock starts (mission step 4 and later), ignore map changes.
-		 */
-		if (valid && UserTask_GetMissionStep() <= 3)
-		{
-			barriers[0].row = b1; barriers[0].col = a1;
-			barriers[1].row = b2; barriers[1].col = a2;
-			barriers[2].row = b3; barriers[2].col = a3;
-			gs_barrier_received = 1;
-			// 回传确认标志给地面站（0xFF表示已接收）
-			u8 ack = 0xFF;
-			DrvUart2SendBuf(&ack, 1);
-		}
-	}
-#endif
-
 	UserTask_OneKeyCmd();
 	//////////////////////////////////////////////////////////////////////
-}
-
-u8 GS_Barrier_Received(void)
-{
-	return gs_barrier_received;
 }
 
 static void Loop_20Hz(void) //50ms执行一次
