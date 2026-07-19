@@ -312,6 +312,52 @@ static int build_full_path(Point order[], int count)
     return final_path_length;
 }
 
+/*
+ * Keep only the start, end and direction-change points.  Every removed point
+ * lies on the same horizontal or vertical line between two retained points,
+ * so the aircraft still passes through the original cells and all obstacle
+ * detours remain unchanged.
+ */
+static void compress_collinear_path(void)
+{
+    int read_index;
+    int write_index;
+    int original_length = final_path_length;
+
+    if (original_length <= 2)
+    {
+        return;
+    }
+
+    write_index = 1;
+    for (read_index = 1;
+         read_index < original_length - 1;
+         read_index++)
+    {
+        int incoming_row =
+            final_path[read_index].row -
+            final_path[read_index - 1].row;
+        int incoming_col =
+            final_path[read_index].col -
+            final_path[read_index - 1].col;
+        int outgoing_row =
+            final_path[read_index + 1].row -
+            final_path[read_index].row;
+        int outgoing_col =
+            final_path[read_index + 1].col -
+            final_path[read_index].col;
+
+        if (incoming_row != outgoing_row ||
+            incoming_col != outgoing_col)
+        {
+            final_path[write_index++] = final_path[read_index];
+        }
+    }
+
+    final_path[write_index++] = final_path[original_length - 1];
+    final_path_length = write_index;
+}
+
 u8 run_path_planner(void)
 {
     int row_count;
@@ -355,6 +401,7 @@ u8 run_path_planner(void)
         return 0;
     }
 
+    compress_collinear_path();
     return 1;
 }
 
