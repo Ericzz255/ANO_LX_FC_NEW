@@ -1,6 +1,7 @@
 #include "UserDataTransfer.h"
 #include "ANO_LX.h"
 #include "Drv_Uart.h"
+#include "Drv_AnoOf.h"
 #include "HorizontalControl.h"
 
 #define USER_DATA_DEST_ADDR   HW_ALL
@@ -27,6 +28,10 @@ static void UserDataTransfer_FillPayloadF1(u8 *buffer, u8 *cnt)
     /* USERDATA5: 1 = SLAM position is ready and fresh, 0 = not ready. */
     UserData_PutS16(buffer, cnt,
                     HorizontalControl_HasValidPosition() ? 1 : 0);
+    /* USERDATA6: optical-flow image quality, range 0 to 255. */
+    UserData_PutS16(buffer, cnt, (s16)ano_of.of_quality);
+    /* USERDATA7: MODE1 optical-flow velocity valid flag, 0 or 1. */
+    UserData_PutS16(buffer, cnt, (s16)ano_of.of1_sta);
 }
 
 static void UserDataTransfer_SendFrame(u8 frame_id,
