@@ -24,6 +24,9 @@ static void UserDataTransfer_FillPayloadF1(u8 *buffer, u8 *cnt)
     UserData_PutS16(buffer, cnt, fc_vel.st_data.vel_x);
     /* 数据位4：飞控内部估计的Y水平速度，单位cm/s。 */
     UserData_PutS16(buffer, cnt, fc_vel.st_data.vel_y);
+    /* USERDATA5: 1 = SLAM position is ready and fresh, 0 = not ready. */
+    UserData_PutS16(buffer, cnt,
+                    HorizontalControl_HasValidPosition() ? 1 : 0);
 }
 
 static void UserDataTransfer_SendFrame(u8 frame_id,
