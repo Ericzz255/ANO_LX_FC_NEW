@@ -12,6 +12,7 @@
 #include "Usart2.h"
 #include "Usart3_Pi.h"
 #include "UserDataTransfer.h"
+#include "Drv_Uart.h"
 #include "ANO_LX.h"
 //////////////////////////////////////////////////////////////////////
 //用户程序调度器
@@ -48,17 +49,16 @@ static void Loop_100Hz(void) //10ms执行一次
 static void Loop_50Hz(void) //20ms执行一次
 {
 	static u8 gs_barrier_data[BARRIER_COUNT * 2];
+	u8 ack;
 
-	/*
-	 * Only accept a replacement map before unlock/takeoff.
-	 * A complete valid set is committed atomically by the path planner.
-	 */
+	/* Use the same receive/consume flow as the verified old project. */
 	if (GS_GetData_Flag())
 	{
 		GS_GetData(gs_barrier_data);
-		if (UserTask_GetMissionStep() <= 1)
+		if (PathPlanner_SetBarriers(gs_barrier_data))
 		{
-			PathPlanner_SetBarriers(gs_barrier_data);
+			ack = 0xFF;
+			DrvUart2SendBuf(&ack, 1);
 		}
 	}
 

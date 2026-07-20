@@ -50,7 +50,6 @@ u8 PathPlanner_SetBarriers(const u8 barrier_data[BARRIER_COUNT * 2])
 {
     Point pending[BARRIER_COUNT];
     int i;
-    int j;
 
     if (barrier_data == 0)
     {
@@ -71,13 +70,6 @@ u8 PathPlanner_SetBarriers(const u8 barrier_data[BARRIER_COUNT * 2])
         pending[i].row = row_b;
         pending[i].col = column_a;
 
-        for (j = 0; j < i; j++)
-        {
-            if (point_equal(pending[i], pending[j]))
-            {
-                return 0;
-            }
-        }
     }
 
     for (i = 0; i < BARRIER_COUNT; i++)
