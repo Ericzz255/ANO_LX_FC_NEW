@@ -1,19 +1,20 @@
 #include "User_Task.h"
 #include "Drv_RcIn.h"
 #include "LX_FC_Fun.h"
+#include "LX_FC_State.h"
 #include "Highcontroll.h"
 #include "HorizontalControl.h"
 #include "Path_Planning.h"
 
 #define MISSION_HEIGHT_CM               50U
-#define TAKEOFF_STABILIZE_MS            3000U
+#define TAKEOFF_STABILIZE_MS            2000U
 #define WAYPOINT_TOLERANCE_CM           5
 #define USER_TASK_PERIOD_MS             20U
 
 /*
  * 0 idle                                   空闲
  * 1 send mode 2 command, wait for SLAM and plan the fixed map   发送模式2,等待SLAM并规划固定地图
- * 2 unlock                                 解锁
+ * 2 wait for RC unlock                     等待遥控器解锁
  * 3 wait after unlock                      解锁后等待
  * 4 take off                               起飞
  * 5 stabilize                              稳定悬停
@@ -124,7 +125,12 @@ void UserTask_OneKeyCmd(void)
         break;
 
     case 2:
-        mission_step += FC_Unlock();
+        /* Unlock authority belongs to the RC; never send an unlock command. */
+        if (fc_sta.unlock_sta != 0)
+        {
+            state_timer_ms = 0;
+            mission_step = 3;
+        }
         break;
 
     case 3:
