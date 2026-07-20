@@ -86,6 +86,19 @@ u8 PathPlanner_HasBarrierConfiguration(void)
     return barriers_configured;
 }
 
+void PathPlanner_ClearBarrierConfiguration(void)
+{
+    int i;
+
+    barriers_configured = 0;
+    final_path_length = 0;
+    for (i = 0; i < BARRIER_COUNT; i++)
+    {
+        barriers[i].row = 0;
+        barriers[i].col = 0;
+    }
+}
+
 static void queue_init(Queue *queue)
 {
     queue->front = 0;

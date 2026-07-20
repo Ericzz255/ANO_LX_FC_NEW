@@ -11,6 +11,8 @@ extern u8 Rx_Buf[];
 void DrvUart2Init(u32 br_num);
 void Usart2_IRQ(void);
 void DrvUart2SendBuf(unsigned char *DataToSend, u8 data_num);
+u16 DrvUart2GetRxByteCount(void);
+u8 DrvUart2GetLastRxByte(void);
 
 void DrvUart3Init(u32 br_num);
 void Usart3_IRQ(void);

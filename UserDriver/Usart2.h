@@ -11,5 +11,6 @@
 void GS_DataAnl(u8 com_data);
 u8 GS_GetData_Flag(void);
 void GS_GetData(u8 *store_array);
+u16 GS_GetValidFrameCount(void);
 
 #endif

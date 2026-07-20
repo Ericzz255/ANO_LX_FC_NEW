@@ -11,6 +11,7 @@
 
 static u8 g_GS_dataAnlScs_flag = RESET;
 static u8 g_GS_val_data[GS_VALID_BYTE_LENGTH];
+static u16 g_GS_valid_frame_count = 0;
 
 /*
  * Keep this parser identical to the previously verified project:
@@ -54,6 +55,10 @@ void GS_DataAnl(u8 com_data)
 			{
 				rx_state = 0;
 				g_GS_dataAnlScs_flag = SET;
+				if (g_GS_valid_frame_count < 32767U)
+				{
+					g_GS_valid_frame_count++;
+				}
 			}
 			else
 			{
@@ -67,6 +72,11 @@ void GS_DataAnl(u8 com_data)
 			pack_data_pointer = 0;
 		}
 	}
+}
+
+u16 GS_GetValidFrameCount(void)
+{
+	return g_GS_valid_frame_count;
 }
 
 /* The verified old implementation clears the ready flag when queried. */
