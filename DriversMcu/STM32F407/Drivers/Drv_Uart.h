@@ -15,7 +15,6 @@ void DrvUart2SendBuf(unsigned char *DataToSend, u8 data_num);
 void DrvUart3Init(u32 br_num);
 void Usart3_IRQ(void);
 void DrvUart3SendBuf(unsigned char *DataToSend, u8 data_num);
-void DrvUart3RxEnable(void);
 
 void DrvUart4Init(u32 br_num);
 void Uart4_IRQ(void);

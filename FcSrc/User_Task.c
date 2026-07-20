@@ -1,262 +1,223 @@
-/**
- * @file    User_Task.c
- * @brief   一键程控任务状态机
- * @details 本文件为无人机网格巡航任务的程控状态机，由遥控器 CH6 高位触发，
- *          自动完成起飞、路径规划、逐格移动和降落流程。
- *
- * @author  Eric2195
- * @version 当前版本：Horizontal_Move 固定时间版（2026-05-21）
- *
- * @硬件平台  匿名科创凌霄飞控 ANO_LX_FC (STM32F407)
- * @遥控通道  CH6 高位(>1800): 启动任务  |  中位: 取消/复位  |  低位(<1200): 一键降落
- */
-
 #include "User_Task.h"
-#include "Path_Planning.h"
 #include "Drv_RcIn.h"
 #include "LX_FC_Fun.h"
-#include "Ano_Math.h"
-#include "ANO_LX.h"
 #include "LX_FC_State.h"
-#include "Ano_Scheduler.h"
-#include "Usart2.h"
+#include "Highcontroll.h"
+#include "HorizontalControl.h"
+#include "Path_Planning.h"
 
-/**
- * @brief  当前飞机水平位置（由树莓派 SLAM 通过 USART3 实时更新）
- * @note   单位：厘米。now_x 对应左右方向（飞机左侧为正），
- *         now_y 对应前后方向（机头前方为正）。
- */
-s16 now_x = 0;
-s16 now_y = 0;
+#define MISSION_HEIGHT_CM               50U
+#define TAKEOFF_STABILIZE_MS            2000U
+#define WAYPOINT_TOLERANCE_CM           5
+#define USER_TASK_PERIOD_MS             20U
 
-/*============================ 一键程控任务状态机 ============================*/
-/**
- * @brief  一键程控任务主状态机
- * @note   【调用周期】：20ms（由 Ano_Scheduler.c 的 Loop_50Hz 调用）
- *
- *         【触发方式】（看遥控器 CH6 通道值）：
- *           - CH6 低位 (800~1200) : 一键降落（独立逻辑，随时可用）
- *           - CH6 中位 (1200~1800): 取消任务，清零速度，复位所有状态
- *           - CH6 高位 (1800~2200): 启动任务流程
- *
- *         【任务主流程】（mission_step 状态机）：
- *           case 0 : 空闲/复位状态
- *           case 1 : 切换为程控模式 (LX_Change_Mode(3))
- *           case 2 : 解锁电机 (FC_Unlock())
- *           case 3 : 延时 2s，等待解锁稳定
- *           case 4 : 等待地面站发送3个禁飞区坐标 (GS_Barrier_Received())
- *           case 5 : 等待地面站按下路径规划按钮 (GS_PlanCmd_Received())
- *           case 6 : 一键起飞到 110cm (OneKey_Takeoff(110))
- *           case 7 : 悬停稳定 4s
- *           case 8 : 航点跟踪：按规划路径逐格移动（内含子状态机 move_sub_step）
- *           case 9 : 降落 (OneKey_Land())
- *
- *         【case 8 子状态机】（move_sub_step）：
- *           sub_step 0 : 计算下一格方向，发送 Horizontal_Move 指令
- *           sub_step 1 : 等待移动完成（固定6s），随后进入下一格
- *
- *         【安全保护】：
- *           - CH6 中位：立即清零 vel_x/vel_y/vel_z，重置所有状态
- *           - 失控保护(fail_safe)：遥控器信号丢失，同样清零并复位
+/*
+ * 0 idle                                   空闲
+ * 1 send mode 2 command, wait for SLAM and plan the fixed map   发送模式2,等待SLAM并规划固定地图
+ * 2 wait for RC unlock                     等待遥控器解锁
+ * 3 wait after unlock                      解锁后等待
+ * 4 take off                               起飞
+ * 5 stabilize                              稳定悬停
+ * 6 traverse waypoints                     遍历航点
+ * 7 land                                   降落
  */
+static u8 mission_step = 0;
+static u16 waypoint_index = 0;
+static u8 waypoint_target_loaded = 0;
+
+static void UserTask_ResetMission(void)
+{
+    mission_step = 0;
+    waypoint_index = 0;
+    waypoint_target_loaded = 0;
+    HorizontalControl_Reset();
+    HeightControl_Reset();
+}
+
+static void UserTask_EnterLanding(void)
+{
+    mission_step = 7;
+    waypoint_target_loaded = 0;
+    HorizontalControl_StopOutput();
+    HeightControl_Reset();
+}
+
+u8 UserTask_GetMissionStep(void)
+{
+    return mission_step;
+}
+
+u16 UserTask_GetWaypointIndex(void)
+{
+    return waypoint_index;
+}
+
+u16 UserTask_GetPathLength(void)
+{
+    return (final_path_length > 0) ? (u16)final_path_length : 0;
+}
+
 void UserTask_OneKeyCmd(void)
 {
-    static u8 one_key_land_f = 1;
-    static u8 one_key_mission_f = 0;
-    static u8 mission_step = 0;
-    static u16 delay_cnt_ms = 0;
-    static u8 wp_idx = 0;
-    static u8 move_sub_step = 0;
-    static u16 move_wait_ms = 0;
+    static u8 land_command_sent = 0;
+    static u16 state_timer_ms = 0;
+    u16 ch6 = rc_in.rc_ch.st_data.ch_[ch_6_aux2];
 
-    if (rc_in.fail_safe == 0)
+    if (rc_in.fail_safe != 0)
     {
-        if (rc_in.rc_ch.st_data.ch_[ch_6_aux2] > 800 && rc_in.rc_ch.st_data.ch_[ch_6_aux2] < 1200)
+        UserTask_ResetMission();
+        land_command_sent = 0;
+        state_timer_ms = 0;
+        return;
+    }
+
+    /* CH6 low: manual landing. */
+    if (ch6 > 800 && ch6 < 1200)
+    {
+        HorizontalControl_StopOutput();
+        HeightControl_Reset();
+        if (land_command_sent == 0)
         {
-            if (one_key_land_f == 0)
+            land_command_sent = OneKey_Land();
+        }
+        mission_step = 0;
+        waypoint_index = 0;
+        waypoint_target_loaded = 0;
+        state_timer_ms = 0;
+        return;
+    }
+
+    /* Only CH6 high runs the automatic mission. */
+    if (ch6 <= 1800 || ch6 >= 2200)
+    {
+        UserTask_ResetMission();
+        land_command_sent = 0;
+        state_timer_ms = 0;
+        return;
+    }
+
+    if (mission_step == 0)
+    {
+        UserTask_ResetMission();
+        mission_step = 1;
+        land_command_sent = 0;
+        state_timer_ms = 0;
+    }
+
+    switch (mission_step)
+    {
+    case 1:
+        if (PathPlanner_HasBarrierConfiguration() &&
+            HorizontalControl_HasValidPosition() &&
+            LX_Change_Mode(2))
+        {
+            /*
+             * Do not unlock unless the received map produces a safe route
+             * starting at the mission origin.
+             */
+            if (run_path_planner())
             {
-                one_key_land_f = OneKey_Land();
+                HorizontalControl_Reset();
+                HorizontalControl_CaptureTarget();
+                mission_step = 2;
             }
         }
-        else
+        break;
+
+    case 2:
+        /* Unlock authority belongs to the RC; never send an unlock command. */
+        if (fc_sta.unlock_sta != 0)
         {
-            one_key_land_f = 0;
+            state_timer_ms = 0;
+            mission_step = 3;
+        }
+        break;
+
+    case 3:
+        state_timer_ms += USER_TASK_PERIOD_MS;
+        if (state_timer_ms >= 2000U)
+        {
+            state_timer_ms = 0;
+            mission_step = 4;
+        }
+        break;
+
+    case 4:
+        mission_step += OneKey_Takeoff(MISSION_HEIGHT_CM);
+        break;
+
+    case 5:
+        state_timer_ms += USER_TASK_PERIOD_MS;
+        HeightControl_Update((float)MISSION_HEIGHT_CM);
+        HorizontalControl_Update();
+
+        /* The remaining horizontal fault is SLAM data timeout. */
+        if (HorizontalControl_GetFaultCode() != 0)
+        {
+            UserTask_EnterLanding();
+        }
+        else if (state_timer_ms >= TAKEOFF_STABILIZE_MS)
+        {
+            state_timer_ms = 0;
+            waypoint_index = 0;
+            waypoint_target_loaded = 0;
+            mission_step = 6;
+        }
+        break;
+
+    case 6:
+    {
+        s16 target_x_cm;
+        s16 target_y_cm;
+
+        if (HorizontalControl_GetFaultCode() != 0)
+        {
+            UserTask_EnterLanding();
+            break;
         }
 
-        if (rc_in.rc_ch.st_data.ch_[ch_6_aux2] > 1800 && rc_in.rc_ch.st_data.ch_[ch_6_aux2] < 2200)
+        if (waypoint_index >= (u16)final_path_length)
         {
-            if (one_key_mission_f == 0)
-            {
-                one_key_mission_f = 1;
-                mission_step = 1;
-                delay_cnt_ms = 0;
-            }
-        }
-        else
-        {
-            one_key_mission_f = 0;
+            UserTask_EnterLanding();
+            break;
         }
 
-        if (one_key_mission_f == 1)
+        if (waypoint_target_loaded == 0)
         {
-            switch (mission_step)
+            if (PathPlanner_PointToSlam(final_path[waypoint_index],
+                                        &target_x_cm,
+                                        &target_y_cm) &&
+                HorizontalControl_SetTarget(target_x_cm, target_y_cm))
             {
-            case 0:
-            {
-                delay_cnt_ms = 0;
-            }
-            break;
-
-            case 1:
-            {
-                mission_step += LX_Change_Mode(3);
-            }
-            break;
-
-            case 2:
-            {
-                mission_step += FC_Unlock();
-            }
-            break;
-
-            case 3:
-            {
-                delay_cnt_ms += 20;
-                if (delay_cnt_ms >= 2000)
-                {
-                    delay_cnt_ms = 0;
-                    mission_step++;
-                }
-            }
-            break;
-
-            case 4:
-            {
-                /* 等待地面站发送3个禁飞区坐标 */
-                if (GS_Barrier_Received())
-                {
-                    mission_step++;
-                }
-            }
-            break;
-
-            case 5:
-            {
-                /* 等待地面站发送路径规划触发命令(0x55+0xA1+0x65) */
-                if (GS_PlanCmd_Received())
-                {
-                    run_path_planner();
-                    if (final_path_length > 0)
-                    {
-                        mission_step++;
-                    }
-                    else
-                    {
-                        mission_step = 9; /* 路径规划失败，跳过起飞直接降落 */
-                    }
-                }
-            }
-            break;
-
-            case 6:
-            {
-                mission_step += OneKey_Takeoff(110);
-            }
-            break;
-
-            case 7:
-            {
-                delay_cnt_ms += 20;
-                if (delay_cnt_ms >= 4000)
-                {
-                    delay_cnt_ms = 0;
-                    mission_step++;
-                }
-            }
-            break;
-
-            case 8:
-            {
-                if (wp_idx < final_path_length - 1)
-                {
-                    if (move_sub_step == 0)
-                    {
-                        Point cur = final_path[wp_idx];
-                        Point next = final_path[wp_idx + 1];
-                        int dr = next.row - cur.row;
-                        int dc = next.col - cur.col;
-
-                        u16 angle = 0;
-                        if (dr == 1 && dc == 0)
-                            angle = 0;
-                        else if (dr == -1 && dc == 0)
-                            angle = 180;
-                        else if (dr == 0 && dc == 1)
-                            angle = 270;
-                        else if (dr == 0 && dc == -1)
-                            angle = 90;
-
-                        if (Horizontal_Move(GRID_SIZE_CM, 25, angle))
-                        {
-                            move_sub_step = 1;
-                            move_wait_ms = 0;
-                        }
-                    }
-                    else if (move_sub_step == 1)
-                    {
-                        move_wait_ms += 20;
-                        if (move_wait_ms >= 6000)
-                        {
-                            wp_idx++;
-                            move_wait_ms = 0;
-                            move_sub_step = 0;
-                        }
-                    }
-                }
-                else
-                {
-                    wp_idx = 0;
-                    move_sub_step = 0;
-                    move_wait_ms = 0;
-                    mission_step++;
-                }
-            }
-            break;
-
-            case 9:
-            {
-                mission_step += OneKey_Land();
-            }
-            break;
-
-            default:
-                break;
+                waypoint_target_loaded = 1;
             }
         }
-        else
-        {
-            rt_tar.st_data.vel_x = 0;
-            rt_tar.st_data.vel_y = 0;
-            rt_tar.st_data.vel_z = 0;
 
-            mission_step = 0;
-            delay_cnt_ms = 0;
-            wp_idx = 0;
-            move_sub_step = 0;
-            move_wait_ms = 0;
+        HeightControl_Update((float)MISSION_HEIGHT_CM);
+        HorizontalControl_Update();
+
+        if (HorizontalControl_TargetReached(WAYPOINT_TOLERANCE_CM))
+        {
+            send_step_feedback((int)waypoint_index);
+            waypoint_index++;
+            waypoint_target_loaded = 0;
         }
     }
-    else
-    {
-        rt_tar.st_data.vel_x = 0;
-        rt_tar.st_data.vel_y = 0;
-        rt_tar.st_data.vel_z = 0;
+    break;
 
-        mission_step = 0;
-        one_key_mission_f = 0;
-        delay_cnt_ms = 0;
-        wp_idx = 0;
-        move_sub_step = 0;
-        move_wait_ms = 0;
+    case 7:
+        HorizontalControl_StopOutput();
+        HeightControl_Reset();
+        if (land_command_sent == 0)
+        {
+            land_command_sent = OneKey_Land();
+        }
+        break;
+
+    default:
+        UserTask_ResetMission();
+        state_timer_ms = 0;
+        land_command_sent = 0;
+        break;
     }
 }

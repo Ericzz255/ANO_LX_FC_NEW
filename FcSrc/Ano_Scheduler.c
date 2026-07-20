@@ -7,19 +7,15 @@
 **********************************************************************************/
 #include "Ano_Scheduler.h"
 #include "User_Task.h"
+#include "HorizontalControl.h"
 #include "Path_Planning.h"
 #include "Usart2.h"
 #include "Usart3_Pi.h"
-#include "Drv_Uart.h"
+#include "UserDataTransfer.h"
 #include "ANO_LX.h"
-#include <stdio.h>
 //////////////////////////////////////////////////////////////////////
 //用户程序调度器
 //////////////////////////////////////////////////////////////////////
-
-/* 禁飞区接收状态（文件级变量，供 GS_Barrier_Received() 供 User_Task.c 查询） */
-static u8 gs_barrier_received = 0;
-static u8 gs_data[10];
 
 static void Loop_1000Hz(void) //1ms执行一次
 {
@@ -51,72 +47,42 @@ static void Loop_100Hz(void) //10ms执行一次
 
 static void Loop_50Hz(void) //20ms执行一次
 {
-	// //////////////////////////////////////////////////////////////////////
-	// // 延时约3秒后使能UART3接收中断，避开树莓派启动冲击
-	// static u16 uart3_rx_delay_cnt = 0;
-	// if (uart3_rx_delay_cnt < 150)
-	// {
-	// 	uart3_rx_delay_cnt++;
-	// 	if (uart3_rx_delay_cnt == 150)
-	// 	{
-	// 		DrvUart3RxEnable();
-	// 	}
-	// }
-	//////////////////////////////////////////////////////////////////////
+	static u8 gs_barrier_data[BARRIER_COUNT * 2];
+
+	/*
+	 * Only accept a replacement map before unlock/takeoff.
+	 * A complete valid set is committed atomically by the path planner.
+	 */
+	if (GS_GetData_Flag())
+	{
+		GS_GetData(gs_barrier_data);
+		if (UserTask_GetMissionStep() <= 1)
+		{
+			PathPlanner_SetBarriers(gs_barrier_data);
+		}
+	}
+
 	// 读取已通过CRC16校验的树莓派定位数据
 	static u8 pi_data[4];
 	if (Pi_GetData_Flag())
 	{
 		Pi_GetData(pi_data);
-		now_x = (s16)((pi_data[0] << 8) | pi_data[1]);
-		now_y = (s16)((pi_data[2] << 8) | pi_data[3]);
-	}
-
-	/* 读取地面站禁飞区数据（一帧6字节：A1,B1,A2,B2,A3,B3） */
-	if (!gs_barrier_received && GS_GetData_Flag())
-	{
-		GS_GetData(gs_data);
-
-		// 坐标转换：地面端发的是1-based坐标
-		// A: 列号(1-9)，B: 行号(1-7)
-		// barriers[].row = B，barriers[].col = A
-		u8 a1 = gs_data[0], b1 = gs_data[1];
-		u8 a2 = gs_data[2], b2 = gs_data[3];
-		u8 a3 = gs_data[4], b3 = gs_data[5];
-
-		u8 valid = 1;
-		if (a1 < 1 || a1 > 9 || b1 < 1 || b1 > 7) valid = 0;
-		if (a2 < 1 || a2 > 9 || b2 < 1 || b2 > 7) valid = 0;
-		if (a3 < 1 || a3 > 9 || b3 < 1 || b3 > 7) valid = 0;
-
-		if (valid)
-		{
-			barriers[0].row = b1; barriers[0].col = a1;
-			barriers[1].row = b2; barriers[1].col = a2;
-			barriers[2].row = b3; barriers[2].col = a3;
-			gs_barrier_received = 1;
-			// 回传确认标志给地面站（0xFF表示已接收）
-			u8 ack = 0xFF;
-			DrvUart2SendBuf(&ack, 1);
-		}
+		HorizontalControl_SetPosition(
+			(s16)((pi_data[0] << 8) | pi_data[1]),
+			(s16)((pi_data[2] << 8) | pi_data[3]));
 	}
 
 	UserTask_OneKeyCmd();
 	//////////////////////////////////////////////////////////////////////
 }
 
-u8 GS_Barrier_Received(void)
-{
-	return gs_barrier_received;
-}
-
 static void Loop_20Hz(void) //50ms执行一次
 {
+	UserDataTransfer_Task();
 }
 
 static void Loop_2Hz(void) //500ms执行一次
 {
-	
 }
 //////////////////////////////////////////////////////////////////////
 //调度器初始化

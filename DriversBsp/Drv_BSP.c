@@ -12,8 +12,8 @@
 #include "Drv_RcIn.h"
 #include "Drv_Timer.h"
 #include "ANO_DT_LX.h"
-#include "Drv_UbloxGPS.h"
 #include "Drv_Uart.h"
+#include "Usart1_MaixCam.h"
 #include "Drv_Timer.h"
 
 u8 All_Init()
@@ -26,6 +26,8 @@ u8 All_Init()
 	//初始化电调输出功能
 	DrvPwmOutInit();
 	MyDelayMs(100);
+	//串口1初始化，连接MaixCam视觉模块
+	MaixCam_Init();
 	//串口2初始化，接入地面站
 	DrvUart2Init(115200);
 	//串口3初始化,接树莓派,接收雷达数据
@@ -43,8 +45,6 @@ u8 All_Init()
 	//数传模块初始化
 	ANO_DT_Init();
 	MyDelayMs(800);
-	//GPS接口初始化
-	Init_GPS();
 	//初始化定时中断
 	DrvTimerFcInit();
 	//初始化完成，返回1

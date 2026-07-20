@@ -416,6 +416,16 @@
               <FilePath>..\FcSrc\User_Task.h</FilePath>
             </File>
             <File>
+              <FileName>Highconrtroll.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\FcSrc\Highconrtroll.c</FilePath>
+            </File>
+            <File>
+              <FileName>Highcontroll.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\FcSrc\Highcontroll.h</FilePath>
+            </File>
+            <File>
               <FileName>ANO_DT_LX.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\FcSrc\ANO_DT_LX.c</FilePath>
@@ -474,6 +484,16 @@
               <FileName>Path_Planning.h</FileName>
               <FileType>5</FileType>
               <FilePath>..\FcSrc\Path_Planning.h</FilePath>
+            </File>
+            <File>
+              <FileName>HorizontalControl.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\FcSrc\HorizontalControl.c</FilePath>
+            </File>
+            <File>
+              <FileName>HorizontalControl.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\FcSrc\HorizontalControl.h</FilePath>
             </File>
           </Files>
         </Group>
@@ -714,6 +734,26 @@
               <FileName>README.md</FileName>
               <FileType>5</FileType>
               <FilePath>..\UserDriver\README.md</FilePath>
+            </File>
+            <File>
+              <FileName>UserDataTransfer.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\UserDriver\UserDataTransfer.c</FilePath>
+            </File>
+            <File>
+              <FileName>UserDataTransfer.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\UserDriver\UserDataTransfer.h</FilePath>
+            </File>
+            <File>
+              <FileName>Usart1_MaixCam.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\UserDriver\Usart1_MaixCam.c</FilePath>
+            </File>
+            <File>
+              <FileName>Usart1_MaixCam.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\UserDriver\Usart1_MaixCam.h</FilePath>
             </File>
           </Files>
         </Group>

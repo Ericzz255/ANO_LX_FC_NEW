@@ -11,10 +11,11 @@
 #include "Drv_AnoOf.h"
 #include "Usart2.h"
 #include "Usart3_Pi.h"
+#include "Usart1_MaixCam.h"
 
 void NoUse(u8 data){}
 //串口接收发送快速定义，直接修改此处的函数名称宏，修改成自己的串口解析和发送函数名称即可，注意函数参数格式需统一
-#define U1GetOneByte	UBLOX_M8_GPS_Data_Receive
+#define U1GetOneByte	MaixCam_DataAnl
 #define U2GetOneByte	GS_DataAnl
 #define U3GetOneByte	Pi_DataAnl
 #define U4GetOneByte	AnoOF_GetOneByte
@@ -88,15 +89,18 @@ u8 count1 = 0;
 void DrvUart1SendBuf(unsigned char *DataToSend, u8 data_num)
 {
     u8 i;
+
+    while (USART1->CR1 & USART_CR1_TXEIE);
+
+    count1 = 0;
+    Tx1Counter = 0;
     for (i = 0; i < data_num; i++)
     {
-        Tx1Buffer[count1++] = *(DataToSend + i);
+        Tx1Buffer[i] = *(DataToSend + i);
     }
+    count1 = data_num;
 
-    if (!(USART1->CR1 & USART_CR1_TXEIE))
-    {
-        USART_ITConfig(USART1, USART_IT_TXE, ENABLE); //打开发送中断
-    }
+    USART_ITConfig(USART1, USART_IT_TXE, ENABLE); //打开发送中断
 }
 u8 U1RxDataTmp[100];
 u8 U1RxInCnt = 0;
@@ -325,20 +329,10 @@ void DrvUart3Init(u32 br_num)
     USART_Init(USART3, &USART_InitStructure);
     USART_ClockInit(USART3, &USART_ClockInitStruct);
 
-    //初始化阶段暂不打开RX中断，等飞控就绪后再由Ano_Scheduler打开
-    //USART_ITConfig(USART3, USART_IT_RXNE, ENABLE);
-    //使能USART2
+    //使能USART3接收中断，树莓派上电后可立即发送SLAM定位数据
+    USART_ITConfig(USART3, USART_IT_RXNE, ENABLE);
+    //使能USART3
     USART_Cmd(USART3, ENABLE);
-}
-
-void DrvUart3RxEnable(void)
-{
-    static u8 enabled = 0;
-    if (!enabled)
-    {
-        enabled = 1;
-        USART_ITConfig(USART3, USART_IT_RXNE, ENABLE);
-    }
 }
 
 u8 Tx3Buffer[256];
