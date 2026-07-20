@@ -8,8 +8,9 @@
 #include "Ano_Scheduler.h"
 #include "User_Task.h"
 #include "HorizontalControl.h"
+#include "Path_Planning.h"
+#include "Usart2.h"
 #include "Usart3_Pi.h"
-#include "Usart1debug.h"
 #include "UserDataTransfer.h"
 #include "ANO_LX.h"
 //////////////////////////////////////////////////////////////////////
@@ -46,6 +47,21 @@ static void Loop_100Hz(void) //10ms执行一次
 
 static void Loop_50Hz(void) //20ms执行一次
 {
+	static u8 gs_barrier_data[BARRIER_COUNT * 2];
+
+	/*
+	 * Only accept a replacement map before unlock/takeoff.
+	 * A complete valid set is committed atomically by the path planner.
+	 */
+	if (GS_GetData_Flag())
+	{
+		GS_GetData(gs_barrier_data);
+		if (UserTask_GetMissionStep() <= 1)
+		{
+			PathPlanner_SetBarriers(gs_barrier_data);
+		}
+	}
+
 	// 读取已通过CRC16校验的树莓派定位数据
 	static u8 pi_data[4];
 	if (Pi_GetData_Flag())
@@ -54,7 +70,6 @@ static void Loop_50Hz(void) //20ms执行一次
 		HorizontalControl_SetPosition(
 			(s16)((pi_data[0] << 8) | pi_data[1]),
 			(s16)((pi_data[2] << 8) | pi_data[3]));
-		Usart1Debug_SendSlamCoordinate(now_x, now_y);
 	}
 
 	UserTask_OneKeyCmd();
@@ -68,7 +83,6 @@ static void Loop_20Hz(void) //50ms执行一次
 
 static void Loop_2Hz(void) //500ms执行一次
 {
-	Usart1Debug_TestTask();
 }
 //////////////////////////////////////////////////////////////////////
 //调度器初始化

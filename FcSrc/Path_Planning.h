@@ -15,6 +15,14 @@ extern Point barriers[BARRIER_COUNT];
 extern Point final_path[MAX_PATH_LENGTH];
 extern int final_path_length;
 
+/*
+ * Atomically replaces all three barriers.
+ * Input order is A1,B1,A2,B2,A3,B3 (A=1..9, B=1..7).
+ * Returns 1 only for three valid, distinct cells.
+ */
+u8 PathPlanner_SetBarriers(const u8 barrier_data[BARRIER_COUNT * 2]);
+u8 PathPlanner_HasBarrierConfiguration(void);
+
 void generate_barriers(void);
 int snake_tsp(Point order[]);
 int snake_tsp_col(Point order[]);

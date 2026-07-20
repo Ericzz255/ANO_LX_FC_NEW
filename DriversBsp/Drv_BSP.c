@@ -13,7 +13,7 @@
 #include "Drv_Timer.h"
 #include "ANO_DT_LX.h"
 #include "Drv_Uart.h"
-#include "Usart1debug.h"
+#include "Usart1_MaixCam.h"
 #include "Drv_Timer.h"
 
 u8 All_Init()
@@ -26,8 +26,8 @@ u8 All_Init()
 	//初始化电调输出功能
 	DrvPwmOutInit();
 	MyDelayMs(100);
-	//串口1初始化，作为树莓派坐标调试输出
-	Usart1Debug_Init();
+	//串口1初始化，连接MaixCam视觉模块
+	MaixCam_Init();
 	//串口2初始化，接入地面站
 	DrvUart2Init(115200);
 	//串口3初始化,接树莓派,接收雷达数据

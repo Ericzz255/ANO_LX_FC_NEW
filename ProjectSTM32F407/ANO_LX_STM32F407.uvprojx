@@ -736,16 +736,6 @@
               <FilePath>..\UserDriver\README.md</FilePath>
             </File>
             <File>
-              <FileName>Usart1debug.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\UserDriver\Usart1debug.c</FilePath>
-            </File>
-            <File>
-              <FileName>Usart1debug.h</FileName>
-              <FileType>5</FileType>
-              <FilePath>..\UserDriver\Usart1debug.h</FilePath>
-            </File>
-            <File>
               <FileName>UserDataTransfer.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\UserDriver\UserDataTransfer.c</FilePath>
@@ -754,6 +744,16 @@
               <FileName>UserDataTransfer.h</FileName>
               <FileType>5</FileType>
               <FilePath>..\UserDriver\UserDataTransfer.h</FilePath>
+            </File>
+            <File>
+              <FileName>Usart1_MaixCam.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\UserDriver\Usart1_MaixCam.c</FilePath>
+            </File>
+            <File>
+              <FileName>Usart1_MaixCam.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\UserDriver\Usart1_MaixCam.h</FilePath>
             </File>
           </Files>
         </Group>

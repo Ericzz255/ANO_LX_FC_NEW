@@ -16,14 +16,16 @@
  * @brief 地面站数据逐字节解析（状态机）
  * @param com_data 从串口2接收到的单字节数据
  * @note  由 Drv_Uart.c 的 drvU2DataCheck() 在 ANO_LX_Task() 1ms周期中逐字节调用。
- *        帧格式：0x45(头) + 6字节有效数据(A1,B1,A2,B2,A3,B3) + 0x46(尾)。
+ *        帧格式：0x45(头) + 6字节有效数据(A1,B1,A2,B2,A3,B3)
+ *                + 8位累加和(头及数据) + 0x46(尾)。
  *        解析完成后置位内部标志，供 GS_GetData_Flag 查询。
  */
 void GS_DataAnl(u8 com_data);
 
 /**
  * @brief 查询地面站数据接收完成标志
- * @return SET(1) 有新帧已就绪，同时自动清零；RESET(0) 暂无新数据
+ * @return SET(1) 有新帧已就绪；RESET(0) 暂无新数据
+ * @note  就绪标志由 GS_GetData 在数据复制完成后清零。
  * @note  典型调用者：Ano_Scheduler.c 的 Loop_50Hz（20ms周期任务）
  */
 u8 GS_GetData_Flag(void);

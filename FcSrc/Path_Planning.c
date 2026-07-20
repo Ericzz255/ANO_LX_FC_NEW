@@ -19,11 +19,8 @@ typedef struct
 
 static int grid[ROWS][COLS];
 
-Point barriers[BARRIER_COUNT] = {
-    {3, 9},
-    {3, 8},
-    {3, 7}
-};
+Point barriers[BARRIER_COUNT];
+static u8 barriers_configured = 0;
 
 Point final_path[MAX_PATH_LENGTH];
 int final_path_length = 0;
@@ -47,6 +44,54 @@ static int is_valid(int row, int col)
 static int point_equal(Point a, Point b)
 {
     return a.row == b.row && a.col == b.col;
+}
+
+u8 PathPlanner_SetBarriers(const u8 barrier_data[BARRIER_COUNT * 2])
+{
+    Point pending[BARRIER_COUNT];
+    int i;
+    int j;
+
+    if (barrier_data == 0)
+    {
+        return 0;
+    }
+
+    for (i = 0; i < BARRIER_COUNT; i++)
+    {
+        int column_a = barrier_data[i * 2];
+        int row_b = barrier_data[i * 2 + 1];
+
+        if (column_a < 1 || column_a > COLS ||
+            row_b < 1 || row_b > ROWS)
+        {
+            return 0;
+        }
+
+        pending[i].row = row_b;
+        pending[i].col = column_a;
+
+        for (j = 0; j < i; j++)
+        {
+            if (point_equal(pending[i], pending[j]))
+            {
+                return 0;
+            }
+        }
+    }
+
+    for (i = 0; i < BARRIER_COUNT; i++)
+    {
+        barriers[i] = pending[i];
+    }
+    barriers_configured = 1;
+    final_path_length = 0;
+    return 1;
+}
+
+u8 PathPlanner_HasBarrierConfiguration(void)
+{
+    return barriers_configured;
 }
 
 static void queue_init(Queue *queue)
@@ -366,6 +411,10 @@ u8 run_path_planner(void)
     int col_length;
 
     final_path_length = 0;
+    if (!barriers_configured)
+    {
+        return 0;
+    }
     generate_barriers();
 
     /* The mission origin is grid(0,0); never take off if it is forbidden. */

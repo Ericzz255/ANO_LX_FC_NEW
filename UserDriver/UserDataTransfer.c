@@ -3,6 +3,7 @@
 #include "Drv_Uart.h"
 #include "Drv_AnoOf.h"
 #include "HorizontalControl.h"
+#include "Path_Planning.h"
 
 #define USER_DATA_DEST_ADDR   HW_ALL
 #define USER_DATA_BUFFER_SIZE 32U
@@ -32,6 +33,29 @@ static void UserDataTransfer_FillPayloadF1(u8 *buffer, u8 *cnt)
     UserData_PutS16(buffer, cnt, (s16)ano_of.of_quality);
     /* USERDATA7: MODE1 optical-flow velocity valid flag, 0 or 1. */
     UserData_PutS16(buffer, cnt, (s16)ano_of.of1_sta);
+    /*
+     * USERDATA8..10: three accepted no-fly cells, encoded as A*10+B.
+     * Examples: A1B7 -> 17, A9B1 -> 91.  Zero means that no complete,
+     * valid three-cell configuration has been received yet.
+     */
+    if (PathPlanner_HasBarrierConfiguration())
+    {
+        u8 i;
+        for (i = 0; i < BARRIER_COUNT; i++)
+        {
+            UserData_PutS16(buffer, cnt,
+                            (s16)(barriers[i].col * 10 +
+                                  barriers[i].row));
+        }
+    }
+    else
+    {
+        u8 i;
+        for (i = 0; i < BARRIER_COUNT; i++)
+        {
+            UserData_PutS16(buffer, cnt, 0);
+        }
+    }
 }
 
 static void UserDataTransfer_SendFrame(u8 frame_id,
@@ -63,6 +87,6 @@ static void UserDataTransfer_SendFrame(u8 frame_id,
 
 void UserDataTransfer_Task(void)
 {
-    /* F1仅发送当前X、Y坐标和飞控估计的X、Y水平速度。 */
+    /* F1 sends flight diagnostics and the accepted no-fly configuration. */
     UserDataTransfer_SendFrame(0xf1, UserDataTransfer_FillPayloadF1);
 }

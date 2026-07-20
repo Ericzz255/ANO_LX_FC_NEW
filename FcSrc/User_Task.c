@@ -106,17 +106,20 @@ void UserTask_OneKeyCmd(void)
     switch (mission_step)
     {
     case 1:
-        if (HorizontalControl_HasValidPosition() &&
+        if (PathPlanner_HasBarrierConfiguration() &&
+            HorizontalControl_HasValidPosition() &&
             LX_Change_Mode(2))
         {
             /*
-             * The fixed map is deterministic.  Planning is run once here;
-             * its return value no longer blocks unlock.
+             * Do not unlock unless the received map produces a safe route
+             * starting at the mission origin.
              */
-            run_path_planner();
-            HorizontalControl_Reset();
-            HorizontalControl_CaptureTarget();
-            mission_step = 2;
+            if (run_path_planner())
+            {
+                HorizontalControl_Reset();
+                HorizontalControl_CaptureTarget();
+                mission_step = 2;
+            }
         }
         break;
 
