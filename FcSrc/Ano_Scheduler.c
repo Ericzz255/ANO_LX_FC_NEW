@@ -12,9 +12,7 @@
 #include "Usart2.h"
 #include "Usart3_Pi.h"
 #include "UserDataTransfer.h"
-#include "Drv_Uart.h"
 #include "ANO_LX.h"
-#include "LX_FC_State.h"
 //////////////////////////////////////////////////////////////////////
 //用户程序调度器
 //////////////////////////////////////////////////////////////////////
@@ -50,33 +48,19 @@ static void Loop_100Hz(void) //10ms执行一次
 static void Loop_50Hz(void) //20ms执行一次
 {
 	static u8 gs_barrier_data[BARRIER_COUNT * 2];
-	static u8 was_unlocked = 0;
-	u8 is_unlocked = (fc_sta.unlock_sta != 0);
 
 	/*
-	 * Only accept a no-fly configuration after RC unlock.  Frames received
-	 * while locked are consumed and discarded.  Re-locking invalidates the
-	 * previous configuration, so every new flight requires a fresh map.
-	 *
-	 * No ACK is sent on USART2 — the DL20 wireless module is half-duplex
-	 * at the radio level and replying immediately blocks subsequent frames
-	 * from the ground station.  The ground station verifies reception via
-	 * the USERDATA8..10 telemetry fields instead.
+	 * Only accept a replacement map before unlock/takeoff.
+	 * A complete valid set is committed atomically by the path planner.
 	 */
-	if (!is_unlocked)
-	{
-		if (was_unlocked)
-		{
-			PathPlanner_ClearBarrierConfiguration();
-		}
-		(void)GS_GetData_Flag();
-	}
-	else if (GS_GetData_Flag())
+	if (GS_GetData_Flag())
 	{
 		GS_GetData(gs_barrier_data);
-		PathPlanner_SetBarriers(gs_barrier_data);
+		if (UserTask_GetMissionStep() <= 1)
+		{
+			PathPlanner_SetBarriers(gs_barrier_data);
+		}
 	}
-	was_unlocked = is_unlocked;
 
 	// 读取已通过CRC16校验的树莓派定位数据
 	static u8 pi_data[4];

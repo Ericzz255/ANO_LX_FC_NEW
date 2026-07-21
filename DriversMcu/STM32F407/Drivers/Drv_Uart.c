@@ -231,26 +231,11 @@ void DrvUart2SendBuf(unsigned char *DataToSend, u8 data_num)
 u8 U2RxDataTmp[100];
 u8 U2RxInCnt = 0;
 u8 U2RxoutCnt = 0;
-static volatile u16 u2_rx_byte_count = 0;
-static volatile u8 u2_rx_last_byte = 0;
 void drvU2GetByte(u8 data)
 {
-	u2_rx_last_byte = data;
-	if (u2_rx_byte_count < 32767U)
-	{
-		u2_rx_byte_count++;
-	}
 	U2RxDataTmp[U2RxInCnt++] = data;
 	if(U2RxInCnt >= 100)
 		U2RxInCnt = 0;
-}
-u16 DrvUart2GetRxByteCount(void)
-{
-	return u2_rx_byte_count;
-}
-u8 DrvUart2GetLastRxByte(void)
-{
-	return u2_rx_last_byte;
 }
 void drvU2DataCheck(void)
 {

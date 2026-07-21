@@ -22,7 +22,6 @@ extern int final_path_length;
  */
 u8 PathPlanner_SetBarriers(const u8 barrier_data[BARRIER_COUNT * 2]);
 u8 PathPlanner_HasBarrierConfiguration(void);
-void PathPlanner_ClearBarrierConfiguration(void);
 
 void generate_barriers(void);
 int snake_tsp(Point order[]);

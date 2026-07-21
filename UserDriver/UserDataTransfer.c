@@ -4,7 +4,6 @@
 #include "Drv_AnoOf.h"
 #include "HorizontalControl.h"
 #include "Path_Planning.h"
-#include "Usart2.h"
 
 #define USER_DATA_DEST_ADDR   HW_ALL
 #define USER_DATA_BUFFER_SIZE 32U
@@ -51,16 +50,11 @@ static void UserDataTransfer_FillPayloadF1(u8 *buffer, u8 *cnt)
     }
     else
     {
-        /*
-         * Receive diagnostics before a valid configuration is accepted:
-         * USERDATA8  = 8000 + USART2 RX byte count (diagnostic build marker)
-         * USERDATA9  = last USART2 RX byte (decimal)
-         * USERDATA10 = complete 0x45...0x46 frame count
-         */
-        UserData_PutS16(buffer, cnt,
-                        (s16)(8000 + DrvUart2GetRxByteCount()));
-        UserData_PutS16(buffer, cnt, (s16)DrvUart2GetLastRxByte());
-        UserData_PutS16(buffer, cnt, (s16)GS_GetValidFrameCount());
+        u8 i;
+        for (i = 0; i < BARRIER_COUNT; i++)
+        {
+            UserData_PutS16(buffer, cnt, 0);
+        }
     }
 }
 

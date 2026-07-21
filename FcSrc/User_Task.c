@@ -13,8 +13,8 @@
 
 /*
  * 0 idle                                   空闲
- * 1 wait for RC unlock                     等待遥控器解锁
- * 2 wait for barriers/SLAM and plan route  等待禁飞区和SLAM并规划路线
+ * 1 send mode 2 command, wait for SLAM and plan the fixed map   发送模式2,等待SLAM并规划固定地图
+ * 2 wait for RC unlock                     等待遥控器解锁
  * 3 wait after unlock                      解锁后等待
  * 4 take off                               起飞
  * 5 stabilize                              稳定悬停
@@ -107,21 +107,6 @@ void UserTask_OneKeyCmd(void)
     switch (mission_step)
     {
     case 1:
-        /* Unlock authority belongs to the RC; never send an unlock command. */
-        if (fc_sta.unlock_sta != 0)
-        {
-            state_timer_ms = 0;
-            mission_step = 2;
-        }
-        break;
-
-    case 2:
-        if (fc_sta.unlock_sta == 0)
-        {
-            mission_step = 1;
-            break;
-        }
-
         if (PathPlanner_HasBarrierConfiguration() &&
             HorizontalControl_HasValidPosition() &&
             LX_Change_Mode(2))
@@ -134,20 +119,21 @@ void UserTask_OneKeyCmd(void)
             {
                 HorizontalControl_Reset();
                 HorizontalControl_CaptureTarget();
-                state_timer_ms = 0;
-                mission_step = 3;
+                mission_step = 2;
             }
         }
         break;
 
-    case 3:
-        if (fc_sta.unlock_sta == 0)
+    case 2:
+        /* Unlock authority belongs to the RC; never send an unlock command. */
+        if (fc_sta.unlock_sta != 0)
         {
             state_timer_ms = 0;
-            mission_step = 1;
-            break;
+            mission_step = 3;
         }
+        break;
 
+    case 3:
         state_timer_ms += USER_TASK_PERIOD_MS;
         if (state_timer_ms >= 2000U)
         {
