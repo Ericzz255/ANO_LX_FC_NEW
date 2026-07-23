@@ -115,7 +115,7 @@ void UserTask_OneKeyCmd(void)
              * Do not unlock unless the received map produces a safe route
              * starting at the mission origin.
              */
-            if (run_path_planner())
+            if (final_path_length > 0 || run_path_planner())
             {
                 HorizontalControl_Reset();
                 HorizontalControl_CaptureTarget();

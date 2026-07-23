@@ -12,6 +12,7 @@
 #include "Usart2.h"
 #include "Usart3_Pi.h"
 #include "UserDataTransfer.h"
+#include "LinuxTelemetry.h"
 #include "ANO_LX.h"
 //////////////////////////////////////////////////////////////////////
 //用户程序调度器
@@ -62,6 +63,16 @@ static void Loop_50Hz(void) //20ms执行一次
 		}
 	}
 
+	/* 串口屏点击“航线规划”后，地面站转发 55 A1 65。 */
+	if (GS_PlanCmd_Received())
+	{
+		if (UserTask_GetMissionStep() <= 1 &&
+			PathPlanner_HasBarrierConfiguration())
+		{
+			run_path_planner();
+		}
+	}
+
 	// 读取已通过CRC16校验的树莓派定位数据
 	static u8 pi_data[4];
 	if (Pi_GetData_Flag())
@@ -79,6 +90,7 @@ static void Loop_50Hz(void) //20ms执行一次
 static void Loop_20Hz(void) //50ms执行一次
 {
 	UserDataTransfer_Task();
+	LinuxTelemetry_Send();
 }
 
 static void Loop_2Hz(void) //500ms执行一次
