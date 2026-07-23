@@ -3,9 +3,10 @@
 
 #include "SysConfig.h"
 
-/*
- * Send one flight-state frame from FC USART2 TX to the Linux ground station.
- * Called by the 20 Hz scheduler; USART2 is configured as 115200-8-N-1.
+/**
+ * @brief 从飞控USART2 TX向Linux地面站发送一帧飞行状态数据。
+ * @note 由20Hz调度任务调用；串口参数为115200-8-N-1。
+ * @note 本函数只发送数据，不要求Linux板卡向飞控回传数据。
  */
 void LinuxTelemetry_Send(void);
 
