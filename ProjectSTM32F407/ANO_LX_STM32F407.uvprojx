@@ -760,16 +760,6 @@
               <FileType>5</FileType>
               <FilePath>..\UserDriver\LINUX_UART2_PROTOCOL.md</FilePath>
             </File>
-            <File>
-              <FileName>Usart1_MaixCam.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\UserDriver\Usart1_MaixCam.c</FilePath>
-            </File>
-            <File>
-              <FileName>Usart1_MaixCam.h</FileName>
-              <FileType>5</FileType>
-              <FilePath>..\UserDriver\Usart1_MaixCam.h</FilePath>
-            </File>
           </Files>
         </Group>
       </Groups>
