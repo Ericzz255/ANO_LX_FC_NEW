@@ -8,8 +8,6 @@
 #include "Ano_Scheduler.h"
 #include "User_Task.h"
 #include "HorizontalControl.h"
-#include "Path_Planning.h"
-#include "Usart2.h"
 #include "Usart3_Pi.h"
 #include "UserDataTransfer.h"
 #include "LinuxTelemetry.h"
@@ -48,31 +46,6 @@ static void Loop_100Hz(void) //10ms执行一次
 
 static void Loop_50Hz(void) //20ms执行一次
 {
-	static u8 gs_barrier_data[BARRIER_COUNT * 2];
-
-	/*
-	 * Only accept a replacement map before unlock/takeoff.
-	 * A complete valid set is committed atomically by the path planner.
-	 */
-	if (GS_GetData_Flag())
-	{
-		GS_GetData(gs_barrier_data);
-		if (UserTask_GetMissionStep() <= 1)
-		{
-			PathPlanner_SetBarriers(gs_barrier_data);
-		}
-	}
-
-	/* 串口屏点击“航线规划”后，地面站转发 55 A1 65。 */
-	if (GS_PlanCmd_Received())
-	{
-		if (UserTask_GetMissionStep() <= 1 &&
-			PathPlanner_HasBarrierConfiguration())
-		{
-			run_path_planner();
-		}
-	}
-
 	// 读取已通过CRC16校验的树莓派定位数据
 	static u8 pi_data[4];
 	if (Pi_GetData_Flag())

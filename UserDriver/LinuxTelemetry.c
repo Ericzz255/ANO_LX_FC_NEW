@@ -113,7 +113,7 @@ void LinuxTelemetry_Send(void)
         status |= LINUX_STATUS_UNLOCKED;
     }
 
-    /* bit3：兼容旧任务，表示飞控已经接收完整禁飞区配置。 */
+    /* bit3：飞控内置的三个固定禁飞区已经就绪。 */
     if (PathPlanner_HasBarrierConfiguration())
     {
         status |= LINUX_STATUS_BARRIERS_READY;

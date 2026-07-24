@@ -13,7 +13,7 @@
 
 /*
  * 0 idle                                   空闲
- * 1 send mode 2 command, wait for SLAM and plan the fixed map   发送模式2,等待SLAM并规划固定地图
+ * 1 send mode 2 command, wait for SLAM and plan fixed barriers 发送模式2,等待SLAM并规划固定禁飞区
  * 2 wait for RC unlock                     等待遥控器解锁
  * 3 wait after unlock                      解锁后等待
  * 4 take off                               起飞
@@ -112,7 +112,7 @@ void UserTask_OneKeyCmd(void)
             LX_Change_Mode(2))
         {
             /*
-             * Do not unlock unless the received map produces a safe route
+             * Do not continue unless the fixed map produces a safe route
              * starting at the mission origin.
              */
             if (final_path_length > 0 || run_path_planner())

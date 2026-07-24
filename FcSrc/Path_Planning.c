@@ -19,8 +19,17 @@ typedef struct
 
 static int grid[ROWS][COLS];
 
-Point barriers[BARRIER_COUNT];
-static u8 barriers_configured = 0;
+/*
+ * Linux地面站只接收遥测，不再下发禁飞区。
+ * 固定禁飞格使用屏幕坐标A列/B行：A7B3、A8B3、A9B3。
+ * Point字段顺序为{row(B), col(A)}，起飞原点A9B1不在禁飞区内。
+ */
+Point barriers[BARRIER_COUNT] = {
+    {3, 7},
+    {3, 8},
+    {3, 9}
+};
+static u8 barriers_configured = 1;
 
 Point final_path[MAX_PATH_LENGTH];
 int final_path_length = 0;
