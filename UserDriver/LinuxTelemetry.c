@@ -21,9 +21,6 @@
 #define LINUX_STATUS_PATH_READY            (1U << 4)
 #define LINUX_STATUS_RC_FAILSAFE           (1U << 5)
 
-#define LINUX_HEIGHT_MIN_VALID_CM          5U
-#define LINUX_HEIGHT_MAX_VALID_CM          500U
-
 static void LinuxTelemetry_PutU16(u8 *buffer, u8 *index, u16 value)
 {
     buffer[(*index)++] = (u8)(value & 0xFFU);
@@ -100,11 +97,12 @@ void LinuxTelemetry_Send(void)
         status |= LINUX_STATUS_SLAM_VALID;
     }
 
-    /* bit1：测高模块在线、工作正常，且当前高度处于有效量程。 */
+    /*
+     * bit1：测高模块在线且工作正常。
+     * 遥测显示不套用高度控制器的5~500cm安全量程，因此0cm也有效。
+     */
     if (ano_of.link_sta != 0U &&
-        ano_of.work_sta != 0U &&
-        ano_of.of_alt_cm >= LINUX_HEIGHT_MIN_VALID_CM &&
-        ano_of.of_alt_cm <= LINUX_HEIGHT_MAX_VALID_CM)
+        ano_of.work_sta != 0U)
     {
         status |= LINUX_STATUS_HEIGHT_VALID;
     }
