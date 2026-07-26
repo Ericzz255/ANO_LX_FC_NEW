@@ -2,14 +2,23 @@
 
 _ano_of_st ano_of;
 static uint8_t _datatemp[50];
-static float check_time_ms[3];
+static float check_time_ms[3] = {500.0f, 500.0f, 500.0f};
+static u8 altitude_data_received;
+
+u8 AnoOF_AltitudeIsValid(void)
+{
+	return (altitude_data_received != 0U &&
+			check_time_ms[2] < 500.0f) ? 1U : 0U;
+}
+
 void AnoOF_Check_State(float dT_s)
 {
 	u8 tmp[2];
+	float elapsed_ms = dT_s * 1000.0f;
 	//连接检查
-	if (check_time_ms[0] < 500)
+	if (check_time_ms[0] < 500.0f)
 	{
-		check_time_ms[0]++;
+		check_time_ms[0] += elapsed_ms;
 		ano_of.link_sta = 1;
 	}
 	else
@@ -17,9 +26,9 @@ void AnoOF_Check_State(float dT_s)
 		ano_of.link_sta = 0;
 	}
 	//数据检查1
-	if (check_time_ms[1] < 500)
+	if (check_time_ms[1] < 500.0f)
 	{
-		check_time_ms[1]++;
+		check_time_ms[1] += elapsed_ms;
 		tmp[0] = 1;
 	}
 	else
@@ -27,9 +36,9 @@ void AnoOF_Check_State(float dT_s)
 		tmp[0] = 0;
 	}
 	//数据检查2
-	if (check_time_ms[2] < 500)
+	if (check_time_ms[2] < 500.0f)
 	{
-		check_time_ms[2]++;
+		check_time_ms[2] += elapsed_ms;
 		tmp[1] = 1;
 	}
 	else
@@ -116,6 +125,9 @@ static void AnoOF_DataAnl(uint8_t *data, uint8_t len)
 	}
 	if ((check_sum1 != *(data + len - 2)) || (check_sum2 != *(data + len - 1))) //判断sum校验
 		return;
+
+	/* Any checksum-valid frame proves that the optical-flow module is online. */
+	check_time_ms[0] = 0.0f;
 	//================================================================================
 
 	if (*(data + 2) == 0X51) //光流信息
@@ -154,7 +166,8 @@ static void AnoOF_DataAnl(uint8_t *data, uint8_t len)
 	{
 		ano_of.of_alt_cm = *((u32 *)(data + 7));
 		//
-		check_time_ms[2] = 0;
+		check_time_ms[2] = 0.0f;
+		altitude_data_received = 1U;
 		ano_of.alt_update_cnt++;
 	}
 	else if (*(data + 2) == 0X01) //惯性数据

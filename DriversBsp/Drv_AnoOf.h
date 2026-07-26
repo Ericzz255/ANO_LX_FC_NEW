@@ -57,4 +57,5 @@ static void AnoOF_DataAnl(uint8_t *data_buf, uint8_t num);
 //public
 void AnoOF_GetOneByte(uint8_t data);
 void AnoOF_Check_State(float dT_s);
+u8 AnoOF_AltitudeIsValid(void);
 #endif

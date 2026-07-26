@@ -11,8 +11,8 @@
 #define LINUX_TELEMETRY_HEADER_1          0xAAU
 #define LINUX_TELEMETRY_HEADER_2          0x55U
 #define LINUX_TELEMETRY_TYPE_FLIGHT_STATE 0x01U
-#define LINUX_TELEMETRY_PAYLOAD_LENGTH    18U
-#define LINUX_TELEMETRY_FRAME_LENGTH      24U
+#define LINUX_TELEMETRY_PAYLOAD_LENGTH    22U
+#define LINUX_TELEMETRY_FRAME_LENGTH      28U
 
 #define LINUX_STATUS_SLAM_VALID           (1U << 0)
 #define LINUX_STATUS_HEIGHT_VALID         (1U << 1)
@@ -64,7 +64,7 @@ static u16 LinuxTelemetry_Crc16(const u8 *data, u8 length)
  * @note 串口参数为 115200-8-N-1，多字节数据采用小端序。
  * @note 固定帧格式为：
  *       AA 55 TYPE LEN SEQ MODE STEP STATUS
- *       X Y HEIGHT VX VY WAYPOINT TOTAL CRC16
+ *       X Y HEIGHT VX VY WAYPOINT TOTAL BATTERY YAW CRC16
  *
  * 数据来源：
  * - MODE：飞控实际模式 fc_sta.fc_mode_sta；
@@ -73,6 +73,8 @@ static u16 LinuxTelemetry_Crc16(const u8 *data, u8 length)
  * - VX/VY：飞控内部估计的实际水平速度，单位 cm/s；
  * - STEP：自动任务状态机步骤；
  * - WAYPOINT/TOTAL：当前显示航点和规划航点总数；
+ * - BATTERY：飞控ADC测得的电池电压，单位0.01V；
+ * - YAW：飞控当前偏航角，单位0.01度；
  * - STATUS：SLAM、高度、解锁、航线和遥控失控等状态位。
  *
  * Linux 端必须先检查帧头、TYPE、LEN，再对偏移2至最后一个
@@ -98,11 +100,11 @@ void LinuxTelemetry_Send(void)
     }
 
     /*
-     * bit1：测高模块在线且工作正常。
-     * 遥测显示不套用高度控制器的5~500cm安全量程，因此0cm也有效。
+     * bit1：最近500ms内收到过高度帧。
+     * 高度有效性不依赖XY光流，且不套用高度控制器的5~500cm安全量程，
+     * 因此0cm也是有效的可显示数据。
      */
-    if (ano_of.link_sta != 0U &&
-        ano_of.work_sta != 0U)
+    if (AnoOF_AltitudeIsValid() != 0U)
     {
         status |= LINUX_STATUS_HEIGHT_VALID;
     }
@@ -166,7 +168,7 @@ void LinuxTelemetry_Send(void)
     frame[index++] = LINUX_TELEMETRY_HEADER_2;
     /* 2：帧类型，0x01表示飞行状态。 */
     frame[index++] = LINUX_TELEMETRY_TYPE_FLIGHT_STATE;
-    /* 3：从SEQ到TOTAL的Payload长度，固定18字节。 */
+    /* 3：从SEQ到YAW的Payload长度，固定22字节。 */
     frame[index++] = LINUX_TELEMETRY_PAYLOAD_LENGTH;
     /* 4：循环帧序号，可供Linux端统计丢帧。 */
     frame[index++] = sequence++;
@@ -187,10 +189,14 @@ void LinuxTelemetry_Send(void)
     /* 18..21：当前显示航点/总航点，uint16。 */
     LinuxTelemetry_PutU16(frame, &index, waypoint_progress);
     LinuxTelemetry_PutU16(frame, &index, path_length);
+    /* 22..23：当前电池电压，uint16，单位0.01V。 */
+    LinuxTelemetry_PutU16(frame, &index, fc_bat.st_data.voltage_100);
+    /* 24..25：当前偏航角，int16，单位0.01度。 */
+    LinuxTelemetry_PutS16(frame, &index, fc_att.st_data.yaw_x100);
 
     /*
-     * 22..23：CRC16，小端序。
-     * 计算范围为TYPE、LEN和完整Payload，即frame[2]至frame[21]；
+     * 26..27：CRC16，小端序。
+     * 计算范围为TYPE、LEN和完整Payload，即frame[2]至frame[25]；
      * 帧头AA 55不参与CRC。
      */
     crc = LinuxTelemetry_Crc16(&frame[2],
