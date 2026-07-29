@@ -485,6 +485,16 @@
               <FileType>5</FileType>
               <FilePath>..\FcSrc\HorizontalControl.h</FilePath>
             </File>
+            <File>
+              <FileName>VisionFollowControl.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\FcSrc\VisionFollowControl.c</FilePath>
+            </File>
+            <File>
+              <FileName>VisionFollowControl.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\FcSrc\VisionFollowControl.h</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>

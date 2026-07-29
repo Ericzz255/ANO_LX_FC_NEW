@@ -4,9 +4,11 @@
 #include "LX_FC_State.h"
 #include "Highcontroll.h"
 #include "HorizontalControl.h"
+#include "VisionFollowControl.h"
+#include "MaixCam.h"
 #include "Drv_PwmOut.h"
 
-#define MISSION_HEIGHT_CM               120U
+#define MISSION_HEIGHT_CM               90U
 #define TAKEOFF_STABILIZE_MS            3000U
 #define USER_TASK_PERIOD_MS             20U
 #define HEIGHT_TOLERANCE_CM             5.0f
@@ -21,11 +23,12 @@
  * 2 wait for RC unlock
  * 3 wait after unlock
  * 4 take off to the contest cruise height
- * 5 hold at 120 cm for three continuous seconds
+ * 5 hold at 90 cm for three continuous seconds
  * 6 move right 25 cm (Y negative)
- * 7 move forward 100 cm (X positive)
+ * 7 move forward 100 cm (X positive) and search for the target
  * 8 release the payload
  * 9 land
+ * 10 keep the aircraft over the target under MaixCAM control
  *
  * CH6 is only a bench trigger; the contest start command will later come
  * from the vehicle over the wireless link.
@@ -33,10 +36,14 @@
 static u8 mission_step = 0;
 static s16 mission_origin_x_cm = 0;
 static s16 mission_origin_y_cm = 0;
+static u8 visual_hold_initialized = 0;
 
 static void UserTask_ResetMission(void)
 {
     mission_step = 0;
+    visual_hold_initialized = 0U;
+    MaixCam_SetMode(MAIXCAM_MODE_IDLE);
+    VisionFollowControl_Reset();
     HorizontalControl_Reset();
     HeightControl_Reset();
 }
@@ -44,8 +51,26 @@ static void UserTask_ResetMission(void)
 static void UserTask_EnterLanding(void)
 {
     mission_step = 9;
+    visual_hold_initialized = 0U;
+    MaixCam_SetMode(MAIXCAM_MODE_IDLE);
+    VisionFollowControl_Reset();
     HorizontalControl_StopOutput();
     HeightControl_Reset();
+}
+
+static u8 UserTask_TryEnterVisualFollow(void)
+{
+    maixcam_tracking_t tracking;
+
+    if (MaixCam_GetTracking(&tracking) == RESET)
+    {
+        return RESET;
+    }
+
+    VisionFollowControl_Begin();
+    visual_hold_initialized = 0U;
+    mission_step = 10;
+    return SET;
 }
 
 u8 UserTask_GetMissionStep(void)
@@ -70,6 +95,8 @@ void UserTask_OneKeyCmd(void)
     /* CH6 low: manual landing for bench safety. */
     if (ch6 > 800 && ch6 < 1200)
     {
+        MaixCam_SetMode(MAIXCAM_MODE_IDLE);
+        VisionFollowControl_Reset();
         HorizontalControl_StopOutput();
         HeightControl_Reset();
         if (land_command_sent == 0)
@@ -132,7 +159,11 @@ void UserTask_OneKeyCmd(void)
         break;
 
     case 4:
-        mission_step += OneKey_Takeoff(MISSION_HEIGHT_CM);
+        if (OneKey_Takeoff(MISSION_HEIGHT_CM) != 0U)
+        {
+            MaixCam_SetMode(MAIXCAM_MODE_TRACKING);
+            mission_step = 5;
+        }
         break;
 
     case 5:
@@ -180,6 +211,12 @@ void UserTask_OneKeyCmd(void)
 
     case 7:
         HeightControl_Update((float)MISSION_HEIGHT_CM);
+        if (UserTask_TryEnterVisualFollow() != RESET)
+        {
+            VisionFollowControl_Update();
+            break;
+        }
+
         HorizontalControl_Update();
         if (HorizontalControl_GetFaultCode() != 0)
         {
@@ -202,6 +239,29 @@ void UserTask_OneKeyCmd(void)
         if (land_command_sent == 0)
         {
             land_command_sent = OneKey_Land();
+        }
+        break;
+
+    case 10:
+        HeightControl_Update((float)MISSION_HEIGHT_CM);
+        if (VisionFollowControl_Update() != RESET)
+        {
+            visual_hold_initialized = 0U;
+        }
+        else
+        {
+            if (visual_hold_initialized == 0U)
+            {
+                HorizontalControl_Reset();
+                HorizontalControl_CaptureTarget();
+                visual_hold_initialized = 1U;
+            }
+
+            HorizontalControl_Update();
+            if (HorizontalControl_GetFaultCode() != 0)
+            {
+                UserTask_EnterLanding();
+            }
         }
         break;
 

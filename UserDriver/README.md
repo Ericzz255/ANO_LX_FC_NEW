@@ -7,8 +7,8 @@
 - USART3 接收外部定位坐标，并送入水平位置闭环。
 - 高度控制和水平定点控制。
 - USART2 以 20 Hz 向 Linux 地面站发送无人机位置、速度、高度、电压、偏航角和任务状态，并解析地面站上行帧、记录链路状态和错误计数。
-- USART1 接收 MaixCAM 的小车视觉跟踪和场地定位结果，只传结构化数据，不传输图像。
-- PA9 电磁铁 MOSFET 输出，用于软质物体抛投。
+- USART1 接收 MaixCAM 的四 AprilTag 小车靶心跟踪误差，只传结构化数据，不传输图像；V1.0 不提供场地绝对定位。
+- IOA3/PB0 电磁铁 MOSFET 输出，用于软质物体抛投。
 - 一键起飞、降落和飞控状态接口。
 
 ## 当前自动流程
@@ -17,12 +17,13 @@
 
 1. 等待有效位置并进入程控模式。
 2. 等待遥控器解锁。
-3. 起飞至 120 cm。
+3. 起飞至 90 cm。
 4. 进入高度容差后稳定悬停 3 秒。
 5. 向机体右侧移动 25 cm（Y-）。
-6. 保持横向偏移并向机头前方移动 100 cm（X+）。
-7. 到达终点后将 IOA3/PB0 拉低，释放电磁铁上的物体。
-8. 立即进入一键降落流程。
+6. 保持横向偏移并向机头前方移动 100 cm（X+），同时搜索目标图案。
+7. 前飞途中一旦收到有效 MaixCAM 目标，永久切换为视觉速度闭环，使无人机保持在图案上空。
+8. 视觉跟随期间若暂时丢失目标，立即清零视觉速度和积分，并在当前位置悬停等待重新识别。
+9. 若前飞到终点仍未发现目标，则将 IOA3/PB0 拉低释放物体，随后进入一键降落流程。
 
 CH6 低位保留为台架安全降落。比赛正式流程不能依赖遥控器触发；后续要改为小车一键启动后通过无线链路触发。
 
@@ -41,11 +42,12 @@ CH6 低位保留为台架安全降落。比赛正式流程不能依赖遥控器�
 |---|---|
 | `FcSrc/User_Task.c` | D题任务状态机接入点 |
 | `FcSrc/HorizontalControl.c` | 无人机水平位置闭环 |
+| `FcSrc/VisionFollowControl.c` | MaixCAM 目标误差到机体系速度的视觉闭环 |
 | `FcSrc/Highconrtroll.c` | 高度闭环 |
 | `UserDriver/Usart3_Pi.c` | 外部定位数据接收 |
 | `UserDriver/LinuxTelemetry.c` | 地面站无人机遥测 |
 | `UserDriver/GroundStationRx.c` | 地面站上行帧解析与链路诊断 |
-| `UserDriver/MaixCam.c` | MaixCAM 跟踪、定位数据解析与模式命令 |
+| `UserDriver/MaixCam.c` | MaixCAM 跟踪误差解析、模式命令和失效保护 |
 | `UserDriver/MAIXCAM_UART1_PROTOCOL.md` | MaixCAM 与飞控的串口协议 |
 | `UserDriver/LINUX_UART2_PROTOCOL.md` | 当前 USART2 遥测格式 |
 | `DriversMcu/STM32F407/Drivers/Drv_PwmOut.c` | 电机 PWM 与抛投电磁铁输出 |

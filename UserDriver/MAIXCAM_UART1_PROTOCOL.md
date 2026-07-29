@@ -1,56 +1,124 @@
-# MaixCAM USART1 通信协议
+# MaixCAM - 飞控视觉通信协议 V1.0
 
-## 硬件参数
+本文件与 MaixCAM 端冻结版 `MAIXCAM_FLIGHT_CONTROLLER_PROTOCOL_V1.0.md`
+保持一致。V1.0 只提供四 AprilTag 小车靶心的跟踪误差，不提供场地绝对
+定位；`TYPE 0x02` 为保留类型，双方不得发送。
 
-- 飞控接口：USART1，PA9/TX、PA10/RX
-- 串口参数：115200 bit/s、8 数据位、无校验、1 停止位
-- MaixCAM TX 接飞控 PA10，MaixCAM RX 接飞控 PA9，双方必须共地
+## 硬件与串口
 
-## 帧格式
+- 电平：3.3 V TTL，禁止向 MaixCAM 输入 5 V
+- 波特率：115200 bit/s
+- 格式：8-N-1，无流控
+- MaixCAM：UART1 A19/TX、A18/RX
+- 飞控：USART1 PA9/TX、PA10/RX
 
-`AA 4D TYPE LEN PAYLOAD[LEN] CRC16_LO CRC16_HI`
+```text
+MaixCAM A19 / UART1_TX  -> 飞控 PA10 / USART1_RX
+MaixCAM A18 / UART1_RX  <- 飞控 PA9  / USART1_TX
+MaixCAM GND             --- 飞控 GND
+```
 
-CRC 使用 CRC16-CCITT-FALSE，初值 `0xFFFF`，多项式 `0x1021`，覆盖
-`TYPE`、`LEN` 和完整 Payload。多字节整数均为小端序。
+## 通用帧
 
-### TYPE 0x01：小车视觉跟踪
+```text
+AA 4D TYPE LEN PAYLOAD[LEN] CRC16_LO CRC16_HI
+```
 
-固定 Payload 长度 8 字节：
+- 多字节整数为小端序。
+- `LEN` 最大为 32。
+- 相邻字节间隔超过 50 ms 时接收状态机复位。
+- CRC 为 CRC-16/CCITT-FALSE：初值 `0xFFFF`，多项式 `0x1021`，
+  不反射，无最终异或。
+- CRC 覆盖 `TYPE + LEN + PAYLOAD`，不覆盖帧头。
+
+## TYPE 0x01：跟踪结果
+
+方向：MaixCAM -> 飞控；固定 20 Hz；Payload 固定 8 字节。
 
 | 偏移 | 字段 | 类型 | 说明 |
 |---:|---|---|---|
-| 0 | SEQ | uint8 | 循环帧序号 |
-| 1 | FLAGS | uint8 | bit0=识别到小车/图案 |
-| 2 | X | int16 | 图像横向坐标或横向偏差，单位 px |
-| 4 | Y | int16 | 图像纵向坐标或纵向偏差，单位 px |
-| 6 | CONFIDENCE | uint8 | 识别置信度 0~255 |
-| 7 | RESERVED | uint8 | 预留，发送 0 |
+| 0 | SEQ | uint8 | 每帧递增，包含无效帧 |
+| 1 | FLAGS | uint8 | 视觉状态位 |
+| 2 | ERROR_X_E4 | int16 | 机体系前向归一化光学误差，前方为正 |
+| 4 | ERROR_Y_E4 | int16 | 机体系横向归一化光学误差，左方为正 |
+| 6 | QUALITY | uint8 | V1.0 有效时 255，无效时 0 |
+| 7 | TAG_MASK | uint8 | 四个配置槽位的检测位图 |
 
-X、Y 推荐由 MaixCAM 直接发送“目标中心相对画面中心的偏差”：
-目标在画面右侧时 X 为正，目标在画面下方时 Y 为正。这样飞控不依赖
-MaixCAM 的分辨率。
+误差换算：
 
-### TYPE 0x02：场地定位
+```c
+error_x = (float)ERROR_X_E4 / 10000.0f;
+error_y = (float)ERROR_Y_E4 / 10000.0f;
+```
 
-固定 Payload 长度 10 字节：
+它们不是像素、厘米或速度指令，必须经过带限幅的控制器。
 
-| 偏移 | 字段 | 类型 | 说明 |
-|---:|---|---|---|
-| 0 | SEQ | uint8 | 循环帧序号 |
-| 1 | FLAGS | uint8 | bit0=定位有效 |
-| 2 | X_CM | int16 | 场地坐标 X，单位 cm |
-| 4 | Y_CM | int16 | 场地坐标 Y，单位 cm |
-| 6 | YAW_CDEG | int16 | 航向角，单位 0.01° |
-| 8 | QUALITY | uint8 | 定位质量 0~255 |
-| 9 | RESERVED | uint8 | 预留，发送 0 |
+### FLAGS
 
-坐标轴方向需要在安装和场地标定后，与飞控当前水平控制坐标系统一。
+| 位 | 名称 | 说明 |
+|---:|---|---|
+| bit0 | TARGET_VALID | 当前结果可用于控制 |
+| bit1 | ALL_FOUR | 四个配置标签全部识别 |
+| bit2 | CALIBRATED | 相机标定已加载 |
+| bit3 | HELD | 仅显示用旧结果，不可控制 |
+| bit4~7 | RESERVED | 必须为 0 |
 
-### TYPE 0x80：飞控设置视觉模式
+飞控只在以下条件全部满足时发布有效跟踪数据：
 
-飞控发送，Payload 长度 2 字节：
+```text
+(FLAGS & 0x0F) == 0x07
+FLAGS bit4~7 == 0
+QUALITY == 255
+TAG_MASK == 0x0F
+SEQ 不重复
+帧龄 <= 150 ms
+模式 0x81 应答确认当前为 MODE=1
+CRC、TYPE、LEN 和协议自检均正确
+```
+
+任一条件不满足时立即停止使用视觉误差，后续控制器必须将视觉修正速度
+置零、清除视觉积分并保持飞控自身定点。
+
+固定测试向量：
+
+```text
+AA 4D 01 08 01 07 E8 03 0C FE FF 0F CD D4
+```
+
+对应 `ERROR_X_E4=+1000`、`ERROR_Y_E4=-500`、CRC=`0xD4CD`。
+
+## TYPE 0x80：设置视觉模式
+
+方向：飞控 -> MaixCAM；Payload 固定 2 字节。
 
 | 偏移 | 字段 | 说明 |
 |---:|---|---|
-| 0 | SEQ | 循环帧序号 |
-| 1 | MODE | 0=空闲，1=跟踪，2=定位，3=跟踪+定位 |
+| 0 | SEQ | 命令序号 |
+| 1 | MODE | 0=空闲，1=小车跟踪；其他值非法 |
+
+飞控每 500 ms 重发当前请求模式，以便 MaixCAM 重启后自动恢复。
+
+固定测试向量：
+
+```text
+AA 4D 80 02 10 01 CA 24
+```
+
+## TYPE 0x81：模式状态/应答
+
+方向：MaixCAM -> 飞控；Payload 固定 4 字节。
+
+| 偏移 | 字段 | 说明 |
+|---:|---|---|
+| 0 | COMMAND_SEQ | 被应答的 0x80 命令序号 |
+| 1 | CURRENT_MODE | 当前模式 |
+| 2 | RESULT | 0=接受，1=不支持，2=忙 |
+| 3 | PROTOCOL_MAJOR | 固定为 1 |
+
+只有命令序号、模式、结果和协议主版本全部匹配，飞控才确认视觉模式。
+
+固定测试向量：
+
+```text
+AA 4D 81 04 10 01 00 01 20 2A
+```

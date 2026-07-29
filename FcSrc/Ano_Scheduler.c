@@ -11,6 +11,7 @@
 #include "Usart3_Pi.h"
 #include "UserDataTransfer.h"
 #include "LinuxTelemetry.h"
+#include "MaixCam.h"
 #include "ANO_LX.h"
 //////////////////////////////////////////////////////////////////////
 //用户程序调度器
@@ -62,6 +63,7 @@ static void Loop_50Hz(void) //20ms执行一次
 
 static void Loop_20Hz(void) //50ms执行一次
 {
+	MaixCam_Task();
 	UserDataTransfer_Task();
 	LinuxTelemetry_Send();
 }
