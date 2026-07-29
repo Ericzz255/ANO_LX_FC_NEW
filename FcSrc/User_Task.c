@@ -10,6 +10,7 @@
 
 #define MISSION_HEIGHT_CM               90U
 #define TAKEOFF_STABILIZE_MS            3000U
+#define TARGET_CENTER_HOLD_MS           3500U
 #define USER_TASK_PERIOD_MS             20U
 #define HEIGHT_TOLERANCE_CM             5.0f
 #define POSITION_TOLERANCE_CM           5
@@ -28,7 +29,7 @@
  * 7 move forward 100 cm (X positive) and search for the target
  * 8 release the payload
  * 9 land
- * 10 keep the aircraft over the target under MaixCAM control
+ * 10 keep over the target; land after 3.5 s continuously centered
  *
  * CH6 is only a bench trigger; the contest start command will later come
  * from the vehicle over the wireless link.
@@ -37,11 +38,13 @@ static u8 mission_step = 0;
 static s16 mission_origin_x_cm = 0;
 static s16 mission_origin_y_cm = 0;
 static u8 visual_hold_initialized = 0;
+static u16 target_center_timer_ms = 0;
 
 static void UserTask_ResetMission(void)
 {
     mission_step = 0;
     visual_hold_initialized = 0U;
+    target_center_timer_ms = 0U;
     MaixCam_SetMode(MAIXCAM_MODE_IDLE);
     VisionFollowControl_Reset();
     HorizontalControl_Reset();
@@ -52,6 +55,7 @@ static void UserTask_EnterLanding(void)
 {
     mission_step = 9;
     visual_hold_initialized = 0U;
+    target_center_timer_ms = 0U;
     MaixCam_SetMode(MAIXCAM_MODE_IDLE);
     VisionFollowControl_Reset();
     HorizontalControl_StopOutput();
@@ -69,6 +73,7 @@ static u8 UserTask_TryEnterVisualFollow(void)
 
     VisionFollowControl_Begin();
     visual_hold_initialized = 0U;
+    target_center_timer_ms = 0U;
     mission_step = 10;
     return SET;
 }
@@ -247,9 +252,22 @@ void UserTask_OneKeyCmd(void)
         if (VisionFollowControl_Update() != RESET)
         {
             visual_hold_initialized = 0U;
+            if (VisionFollowControl_IsTargetCentered() != RESET)
+            {
+                target_center_timer_ms += USER_TASK_PERIOD_MS;
+                if (target_center_timer_ms >= TARGET_CENTER_HOLD_MS)
+                {
+                    UserTask_EnterLanding();
+                }
+            }
+            else
+            {
+                target_center_timer_ms = 0U;
+            }
         }
         else
         {
+            target_center_timer_ms = 0U;
             if (visual_hold_initialized == 0U)
             {
                 HorizontalControl_Reset();

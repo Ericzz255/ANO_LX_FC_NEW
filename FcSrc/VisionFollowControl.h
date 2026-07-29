@@ -10,6 +10,7 @@
 void VisionFollowControl_Begin(void);
 void VisionFollowControl_Reset(void);
 u8 VisionFollowControl_Update(void);
+u8 VisionFollowControl_IsTargetCentered(void);
 
 s16 VisionFollowControl_GetOutputVelX(void);
 s16 VisionFollowControl_GetOutputVelY(void);

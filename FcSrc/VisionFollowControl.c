@@ -6,11 +6,12 @@
 #define VISION_FOLLOW_MIN_FRAME_DT_S      0.02f
 #define VISION_FOLLOW_MAX_FRAME_DT_S      0.20f
 #define VISION_FOLLOW_DEADBAND            0.008f
+#define VISION_FOLLOW_CENTER_TOLERANCE     0.015f
 #define VISION_FOLLOW_KP                  100.0f
 #define VISION_FOLLOW_KI                  8.0f
 #define VISION_FOLLOW_KD                  2.0f
 #define VISION_FOLLOW_INTEGRAL_LIMIT      1.50f
-#define VISION_FOLLOW_MAX_VEL_CMPS        20.0f
+#define VISION_FOLLOW_MAX_VEL_CMPS        15.0f
 #define VISION_FOLLOW_MAX_VEL_STEP_CMPS   2
 
 typedef struct
@@ -224,6 +225,27 @@ u8 VisionFollowControl_Update(void)
     rt_tar.st_data.vel_x = vision_follow.output_vel_x;
     rt_tar.st_data.vel_y = vision_follow.output_vel_y;
     return SET;
+}
+
+u8 VisionFollowControl_IsTargetCentered(void)
+{
+    maixcam_tracking_t tracking;
+
+    if (vision_follow.active == 0U ||
+        MaixCam_GetTracking(&tracking) == RESET)
+    {
+        return RESET;
+    }
+
+    if (VisionFollowControl_AbsFloat(tracking.error_x) <=
+            VISION_FOLLOW_CENTER_TOLERANCE &&
+        VisionFollowControl_AbsFloat(tracking.error_y) <=
+            VISION_FOLLOW_CENTER_TOLERANCE)
+    {
+        return SET;
+    }
+
+    return RESET;
 }
 
 s16 VisionFollowControl_GetOutputVelX(void)
