@@ -4,40 +4,46 @@
 #include "LX_FC_State.h"
 #include "Highcontroll.h"
 #include "HorizontalControl.h"
-#include "Path_Planning.h"
+#include "Drv_PwmOut.h"
 
-#define MISSION_HEIGHT_CM               50U
-#define TAKEOFF_STABILIZE_MS            2000U
-#define WAYPOINT_TOLERANCE_CM           5
+#define MISSION_HEIGHT_CM               120U
+#define TAKEOFF_STABILIZE_MS            3000U
 #define USER_TASK_PERIOD_MS             20U
+#define HEIGHT_TOLERANCE_CM             5.0f
+#define POSITION_TOLERANCE_CM           5
+#define RIGHT_OFFSET_Y_CM               (-25)
+#define FORWARD_OFFSET_X_CM             100
 
 /*
- * 0 idle                                   空闲
- * 1 send mode 2 command, wait for SLAM and plan fixed barriers 发送模式2,等待SLAM并规划固定禁飞区
- * 2 wait for RC unlock                     等待遥控器解锁
- * 3 wait after unlock                      解锁后等待
- * 4 take off                               起飞
- * 5 stabilize                              稳定悬停
- * 6 traverse waypoints                     遍历航点
- * 7 land                                   降落
+ * Bench-test mission skeleton for the D problem:
+ * 0 idle
+ * 1 wait for valid position and enter programmable mode
+ * 2 wait for RC unlock
+ * 3 wait after unlock
+ * 4 take off to the contest cruise height
+ * 5 hold at 120 cm for three continuous seconds
+ * 6 move right 25 cm (Y negative)
+ * 7 move forward 100 cm (X positive)
+ * 8 release the payload
+ * 9 land
+ *
+ * CH6 is only a bench trigger; the contest start command will later come
+ * from the vehicle over the wireless link.
  */
 static u8 mission_step = 0;
-static u16 waypoint_index = 0;
-static u8 waypoint_target_loaded = 0;
+static s16 mission_origin_x_cm = 0;
+static s16 mission_origin_y_cm = 0;
 
 static void UserTask_ResetMission(void)
 {
     mission_step = 0;
-    waypoint_index = 0;
-    waypoint_target_loaded = 0;
     HorizontalControl_Reset();
     HeightControl_Reset();
 }
 
 static void UserTask_EnterLanding(void)
 {
-    mission_step = 7;
-    waypoint_target_loaded = 0;
+    mission_step = 9;
     HorizontalControl_StopOutput();
     HeightControl_Reset();
 }
@@ -45,16 +51,6 @@ static void UserTask_EnterLanding(void)
 u8 UserTask_GetMissionStep(void)
 {
     return mission_step;
-}
-
-u16 UserTask_GetWaypointIndex(void)
-{
-    return waypoint_index;
-}
-
-u16 UserTask_GetPathLength(void)
-{
-    return (final_path_length > 0) ? (u16)final_path_length : 0;
 }
 
 void UserTask_OneKeyCmd(void)
@@ -71,7 +67,7 @@ void UserTask_OneKeyCmd(void)
         return;
     }
 
-    /* CH6 low: manual landing. */
+    /* CH6 low: manual landing for bench safety. */
     if (ch6 > 800 && ch6 < 1200)
     {
         HorizontalControl_StopOutput();
@@ -81,13 +77,11 @@ void UserTask_OneKeyCmd(void)
             land_command_sent = OneKey_Land();
         }
         mission_step = 0;
-        waypoint_index = 0;
-        waypoint_target_loaded = 0;
         state_timer_ms = 0;
         return;
     }
 
-    /* Only CH6 high runs the automatic mission. */
+    /* CH6 high runs the temporary bench-test mission. */
     if (ch6 <= 1800 || ch6 >= 2200)
     {
         UserTask_ResetMission();
@@ -99,6 +93,7 @@ void UserTask_OneKeyCmd(void)
     if (mission_step == 0)
     {
         UserTask_ResetMission();
+        DrvDropMagnetSet(1U);
         mission_step = 1;
         land_command_sent = 0;
         state_timer_ms = 0;
@@ -107,20 +102,14 @@ void UserTask_OneKeyCmd(void)
     switch (mission_step)
     {
     case 1:
-        if (PathPlanner_HasBarrierConfiguration() &&
-            HorizontalControl_HasValidPosition() &&
+        if (HorizontalControl_HasValidPosition() &&
             LX_Change_Mode(2))
         {
-            /*
-             * Do not continue unless the fixed map produces a safe route
-             * starting at the mission origin.
-             */
-            if (final_path_length > 0 || run_path_planner())
-            {
-                HorizontalControl_Reset();
-                HorizontalControl_CaptureTarget();
-                mission_step = 2;
-            }
+            HorizontalControl_Reset();
+            HorizontalControl_CaptureTarget();
+            mission_origin_x_cm = now_x;
+            mission_origin_y_cm = now_y;
+            mission_step = 2;
         }
         break;
 
@@ -147,65 +136,67 @@ void UserTask_OneKeyCmd(void)
         break;
 
     case 5:
-        state_timer_ms += USER_TASK_PERIOD_MS;
         HeightControl_Update((float)MISSION_HEIGHT_CM);
         HorizontalControl_Update();
 
-        /* The remaining horizontal fault is SLAM data timeout. */
         if (HorizontalControl_GetFaultCode() != 0)
         {
             UserTask_EnterLanding();
         }
-        else if (state_timer_ms >= TAKEOFF_STABILIZE_MS)
+        else if (HeightControl_TargetReached((float)MISSION_HEIGHT_CM,
+                                             HEIGHT_TOLERANCE_CM))
+        {
+            state_timer_ms += USER_TASK_PERIOD_MS;
+            if (state_timer_ms >= TAKEOFF_STABILIZE_MS &&
+                HorizontalControl_SetTarget(
+                    mission_origin_x_cm,
+                    (s16)(mission_origin_y_cm + RIGHT_OFFSET_Y_CM)))
+            {
+                state_timer_ms = 0;
+                mission_step = 6;
+            }
+        }
+        else
         {
             state_timer_ms = 0;
-            waypoint_index = 0;
-            waypoint_target_loaded = 0;
-            mission_step = 6;
         }
         break;
 
     case 6:
-    {
-        s16 target_x_cm;
-        s16 target_y_cm;
-
+        HeightControl_Update((float)MISSION_HEIGHT_CM);
+        HorizontalControl_Update();
         if (HorizontalControl_GetFaultCode() != 0)
         {
             UserTask_EnterLanding();
-            break;
         }
-
-        if (waypoint_index >= (u16)final_path_length)
+        else if (HorizontalControl_TargetReached(POSITION_TOLERANCE_CM) &&
+                 HorizontalControl_SetTarget(
+                     (s16)(mission_origin_x_cm + FORWARD_OFFSET_X_CM),
+                     (s16)(mission_origin_y_cm + RIGHT_OFFSET_Y_CM)))
         {
-            UserTask_EnterLanding();
-            break;
+            mission_step = 7;
         }
-
-        if (waypoint_target_loaded == 0)
-        {
-            if (PathPlanner_PointToSlam(final_path[waypoint_index],
-                                        &target_x_cm,
-                                        &target_y_cm) &&
-                HorizontalControl_SetTarget(target_x_cm, target_y_cm))
-            {
-                waypoint_target_loaded = 1;
-            }
-        }
-
-        HeightControl_Update((float)MISSION_HEIGHT_CM);
-        HorizontalControl_Update();
-
-        if (HorizontalControl_TargetReached(WAYPOINT_TOLERANCE_CM))
-        {
-            send_step_feedback((int)waypoint_index);
-            waypoint_index++;
-            waypoint_target_loaded = 0;
-        }
-    }
-    break;
+        break;
 
     case 7:
+        HeightControl_Update((float)MISSION_HEIGHT_CM);
+        HorizontalControl_Update();
+        if (HorizontalControl_GetFaultCode() != 0)
+        {
+            UserTask_EnterLanding();
+        }
+        else if (HorizontalControl_TargetReached(POSITION_TOLERANCE_CM))
+        {
+            mission_step = 8;
+        }
+        break;
+
+    case 8:
+        DrvDropMagnetSet(0U);
+        UserTask_EnterLanding();
+        break;
+
+    case 9:
         HorizontalControl_StopOutput();
         HeightControl_Reset();
         if (land_command_sent == 0)

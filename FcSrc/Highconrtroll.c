@@ -124,3 +124,20 @@ void HeightControl_Update(float target_alt_cm)
         rt_tar.st_data.vel_z = (s16)(vel_cmd_cmps - 0.5f);
     }
 }
+
+u8 HeightControl_TargetReached(float target_alt_cm, float tolerance_cm)
+{
+    if (tolerance_cm < 0.0f)
+    {
+        tolerance_cm = -tolerance_cm;
+    }
+
+    if (height_control.initialized == 0 ||
+        height_control.stale_ms > HEIGHT_HOLD_SENSOR_TIMEOUT_MS)
+    {
+        return 0;
+    }
+
+    return (ABS(target_alt_cm - height_control.filtered_alt_cm) <=
+            tolerance_cm);
+}

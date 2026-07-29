@@ -476,16 +476,6 @@
               <FilePath>..\FcSrc\LX_FC_State.h</FilePath>
             </File>
             <File>
-              <FileName>Path_Planning.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\FcSrc\Path_Planning.c</FilePath>
-            </File>
-            <File>
-              <FileName>Path_Planning.h</FileName>
-              <FileType>5</FileType>
-              <FilePath>..\FcSrc\Path_Planning.h</FilePath>
-            </File>
-            <File>
               <FileName>HorizontalControl.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\FcSrc\HorizontalControl.c</FilePath>
@@ -714,16 +704,6 @@
               <FileName>Usart3_Pi.h</FileName>
               <FileType>5</FileType>
               <FilePath>..\UserDriver\Usart3_Pi.h</FilePath>
-            </File>
-            <File>
-              <FileName>Usart2.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\UserDriver\Usart2.c</FilePath>
-            </File>
-            <File>
-              <FileName>Usart2.h</FileName>
-              <FileType>5</FileType>
-              <FilePath>..\UserDriver\Usart2.h</FilePath>
             </File>
             <File>
               <FileName>Usart3_Pi.c</FileName>

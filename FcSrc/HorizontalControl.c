@@ -12,7 +12,7 @@
 #define HORIZONTAL_HOLD_KD_X                   0.08f   /* X轴位置环D增益 */
 #define HORIZONTAL_HOLD_KP_Y                   0.40f   /* Y轴位置环P增益 */
 #define HORIZONTAL_HOLD_KD_Y                   0.05f   /* Y轴位置环D增益 */
-#define HORIZONTAL_HOLD_DEADBAND_CM            5       /* 与航点到达容差统一为5cm */
+#define HORIZONTAL_HOLD_DEADBAND_CM            5       /* 定点保持误差小于5cm时进入死区 */
 #define HORIZONTAL_HOLD_MIN_VEL_CMPS           8       /* 死区外最小有效速度(cm/s) */
 #define HORIZONTAL_HOLD_MAX_VEL_CMPS           20      /* 位置环输出最大速度(cm/s) */
 #define HORIZONTAL_HOLD_MAX_VEL_STEP_CMPS      4       /* 单周期速度增量限幅(cm/s) */

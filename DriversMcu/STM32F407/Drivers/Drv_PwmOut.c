@@ -42,6 +42,8 @@
 
 #endif
 
+static void DrvDropMagnetInit(void);
+
 void DrvPwmOutInit(void)
 {
     TIM_TimeBaseInitTypeDef TIM_TimeBaseStructure;
@@ -214,6 +216,8 @@ void DrvPwmOutInit(void)
     TIM_ARRPreloadConfig(TIM8, ENABLE);
     TIM_Cmd(TIM8, ENABLE);
 
+    DrvDropMagnetInit();
+
 #if (ESC_CALI == 1)
     //校准时先给最大油门。
     TIM1->CCR4 = 2 * INIT_DUTY; //1
@@ -241,6 +245,50 @@ void DrvMotorPWMSet(int16_t pwm[8])
     TIM5->CCR3 = PWM_RADIO * (pwm[5]) + INIT_DUTY; //6
     TIM8->CCR4 = PWM_RADIO * (pwm[6]) + INIT_DUTY; //7
     TIM8->CCR3 = PWM_RADIO * (pwm[7]) + INIT_DUTY; //8
+}
+
+static void DrvDropMagnetInit(void)
+{
+    GPIO_InitTypeDef gpio;
+
+    RCC_AHB1PeriphClockCmd(RCC_AHB1Periph_GPIOB, ENABLE);
+
+    /*
+     * 凌霄飞控IOA接口3号脚对应PB0。MOSFET模块为高电平启动。
+     * 切换为输出模式前先预置ODR为高，避免初始化时产生低电平脉冲。
+     */
+    GPIO_SetBits(GPIOB, GPIO_Pin_0);
+    GPIO_StructInit(&gpio);
+    gpio.GPIO_Pin = GPIO_Pin_0;
+    gpio.GPIO_Mode = GPIO_Mode_OUT;
+    gpio.GPIO_Speed = GPIO_Speed_50MHz;
+    gpio.GPIO_OType = GPIO_OType_PP;
+    gpio.GPIO_PuPd = GPIO_PuPd_UP;
+    GPIO_Init(GPIOB, &gpio);
+    DrvDropMagnetSet(1U);
+}
+
+void DrvDropMagnetSet(uint8_t enable)
+{
+#if (DROP_MAGNET_ACTIVE_HIGH == 1)
+    if (enable != 0U)
+    {
+        GPIO_SetBits(GPIOB, GPIO_Pin_0);
+    }
+    else
+    {
+        GPIO_ResetBits(GPIOB, GPIO_Pin_0);
+    }
+#else
+    if (enable != 0U)
+    {
+        GPIO_ResetBits(GPIOB, GPIO_Pin_0);
+    }
+    else
+    {
+        GPIO_SetBits(GPIOB, GPIO_Pin_0);
+    }
+#endif
 }
 
 /******************* (C) COPYRIGHT 2014 ANO TECH *****END OF FILE************/

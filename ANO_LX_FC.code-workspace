@@ -1,0 +1,17 @@
+{
+    "folders": [
+        {
+            "name": "ANO_LX_FC",
+            "path": "."
+        }
+    ],
+    "settings": {
+        "C_Cpp.intelliSenseEngine": "default",
+        "C_Cpp.errorSquiggles": "enabled"
+    },
+    "extensions": {
+        "recommendations": [
+            "ms-vscode.cpptools"
+        ]
+    }
+}
