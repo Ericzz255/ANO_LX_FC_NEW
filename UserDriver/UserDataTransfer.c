@@ -1,8 +1,8 @@
 #include "UserDataTransfer.h"
 #include "ANO_LX.h"
 #include "Drv_Uart.h"
-#include "Drv_AnoOf.h"
 #include "HorizontalControl.h"
+#include "User_Task.h"
 
 #define USER_DATA_DEST_ADDR   HW_ALL
 #define USER_DATA_BUFFER_SIZE 32U
@@ -20,16 +20,9 @@ static void UserDataTransfer_FillPayloadF1(u8 *buffer, u8 *cnt)
     /* USERDATA1..2: current position, centimetres. */
     UserData_PutS16(buffer, cnt, now_x);
     UserData_PutS16(buffer, cnt, now_y);
-    /* USERDATA3..4: estimated horizontal velocity, centimetres/second. */
-    UserData_PutS16(buffer, cnt, fc_vel.st_data.vel_x);
-    UserData_PutS16(buffer, cnt, fc_vel.st_data.vel_y);
-    /* USERDATA5: fresh position flag. */
+    /* USERDATA3: 1 while mission step 10 owns horizontal control. */
     UserData_PutS16(buffer, cnt,
-                    HorizontalControl_HasValidPosition() ? 1 : 0);
-    /* USERDATA6: optical-flow image quality, 0..255. */
-    UserData_PutS16(buffer, cnt, (s16)ano_of.of_quality);
-    /* USERDATA7: MODE1 optical-flow velocity valid flag. */
-    UserData_PutS16(buffer, cnt, (s16)ano_of.of1_sta);
+                    (UserTask_GetMissionStep() == 10U) ? 1 : 0);
 }
 
 static void UserDataTransfer_SendFrame(u8 frame_id,

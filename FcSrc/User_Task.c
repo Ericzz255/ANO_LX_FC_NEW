@@ -14,8 +14,7 @@
 #define USER_TASK_PERIOD_MS             20U
 #define HEIGHT_TOLERANCE_CM             5.0f
 #define POSITION_TOLERANCE_CM           5
-#define RIGHT_OFFSET_Y_CM               (-25)
-#define FORWARD_OFFSET_X_CM             100
+#define FORWARD_OFFSET_X_CM             200
 
 /*
  * Bench-test mission skeleton for the D problem:
@@ -25,8 +24,7 @@
  * 3 wait after unlock
  * 4 take off to the contest cruise height
  * 5 hold at 90 cm for three continuous seconds
- * 6 move right 25 cm (Y negative)
- * 7 move forward 100 cm (X positive) and search for the target
+ * 6 move forward 200 cm (X positive) and search for the target
  * 8 release the payload
  * 9 land
  * 10 keep over the target; land after 3.5 s continuously centered
@@ -185,8 +183,8 @@ void UserTask_OneKeyCmd(void)
             state_timer_ms += USER_TASK_PERIOD_MS;
             if (state_timer_ms >= TAKEOFF_STABILIZE_MS &&
                 HorizontalControl_SetTarget(
-                    mission_origin_x_cm,
-                    (s16)(mission_origin_y_cm + RIGHT_OFFSET_Y_CM)))
+                    (s16)(mission_origin_x_cm + FORWARD_OFFSET_X_CM),
+                    mission_origin_y_cm))
             {
                 state_timer_ms = 0;
                 mission_step = 6;
@@ -199,22 +197,6 @@ void UserTask_OneKeyCmd(void)
         break;
 
     case 6:
-        HeightControl_Update((float)MISSION_HEIGHT_CM);
-        HorizontalControl_Update();
-        if (HorizontalControl_GetFaultCode() != 0)
-        {
-            UserTask_EnterLanding();
-        }
-        else if (HorizontalControl_TargetReached(POSITION_TOLERANCE_CM) &&
-                 HorizontalControl_SetTarget(
-                     (s16)(mission_origin_x_cm + FORWARD_OFFSET_X_CM),
-                     (s16)(mission_origin_y_cm + RIGHT_OFFSET_Y_CM)))
-        {
-            mission_step = 7;
-        }
-        break;
-
-    case 7:
         HeightControl_Update((float)MISSION_HEIGHT_CM);
         if (UserTask_TryEnterVisualFollow() != RESET)
         {
