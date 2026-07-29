@@ -10,11 +10,13 @@
 #include "Drv_UbloxGPS.h"
 #include "Drv_AnoOf.h"
 #include "Usart3_Pi.h"
+#include "GroundStationRx.h"
+#include "MaixCam.h"
 
 void NoUse(u8 data){}
 //串口接收发送快速定义，直接修改此处的函数名称宏，修改成自己的串口解析和发送函数名称即可，注意函数参数格式需统一
-#define U1GetOneByte	NoUse
-#define U2GetOneByte	NoUse
+#define U1GetOneByte	MaixCam_GetOneByte
+#define U2GetOneByte	GroundStationRx_GetOneByte
 #define U3GetOneByte	Pi_DataAnl
 #define U4GetOneByte	AnoOF_GetOneByte
 #define U5GetOneByte	ANO_DT_LX_Data_Receive_Prepare	

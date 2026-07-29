@@ -6,7 +6,8 @@
 
 - USART3 接收外部定位坐标，并送入水平位置闭环。
 - 高度控制和水平定点控制。
-- USART2 以 20 Hz 向 Linux 地面站发送无人机位置、速度、高度、电压、偏航角和任务状态。
+- USART2 以 20 Hz 向 Linux 地面站发送无人机位置、速度、高度、电压、偏航角和任务状态，并解析地面站上行帧、记录链路状态和错误计数。
+- USART1 接收 MaixCAM 的小车视觉跟踪和场地定位结果，只传结构化数据，不传输图像。
 - PA9 电磁铁 MOSFET 输出，用于软质物体抛投。
 - 一键起飞、降落和飞控状态接口。
 
@@ -43,6 +44,9 @@ CH6 低位保留为台架安全降落。比赛正式流程不能依赖遥控器�
 | `FcSrc/Highconrtroll.c` | 高度闭环 |
 | `UserDriver/Usart3_Pi.c` | 外部定位数据接收 |
 | `UserDriver/LinuxTelemetry.c` | 地面站无人机遥测 |
+| `UserDriver/GroundStationRx.c` | 地面站上行帧解析与链路诊断 |
+| `UserDriver/MaixCam.c` | MaixCAM 跟踪、定位数据解析与模式命令 |
+| `UserDriver/MAIXCAM_UART1_PROTOCOL.md` | MaixCAM 与飞控的串口协议 |
 | `UserDriver/LINUX_UART2_PROTOCOL.md` | 当前 USART2 遥测格式 |
 | `DriversMcu/STM32F407/Drivers/Drv_PwmOut.c` | 电机 PWM 与抛投电磁铁输出 |
 

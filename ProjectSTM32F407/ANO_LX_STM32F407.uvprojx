@@ -736,6 +736,31 @@
               <FilePath>..\UserDriver\LinuxTelemetry.h</FilePath>
             </File>
             <File>
+              <FileName>GroundStationRx.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\UserDriver\GroundStationRx.c</FilePath>
+            </File>
+            <File>
+              <FileName>GroundStationRx.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\UserDriver\GroundStationRx.h</FilePath>
+            </File>
+            <File>
+              <FileName>MaixCam.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\UserDriver\MaixCam.c</FilePath>
+            </File>
+            <File>
+              <FileName>MaixCam.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\UserDriver\MaixCam.h</FilePath>
+            </File>
+            <File>
+              <FileName>MAIXCAM_UART1_PROTOCOL.md</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\UserDriver\MAIXCAM_UART1_PROTOCOL.md</FilePath>
+            </File>
+            <File>
               <FileName>LINUX_UART2_PROTOCOL.md</FileName>
               <FileType>5</FileType>
               <FilePath>..\UserDriver\LINUX_UART2_PROTOCOL.md</FilePath>
