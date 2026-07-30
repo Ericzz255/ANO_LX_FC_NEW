@@ -47,14 +47,25 @@ static void Loop_100Hz(void) //10ms执行一次
 
 static void Loop_50Hz(void) //20ms执行一次
 {
-	// 读取已通过CRC16校验的树莓派定位数据
+	/*
+	 * 树莓派SLAM坐标输出为10Hz。调度器仍以50Hz运行任务控制，
+	 * 但每5次只读取一次最新SLAM帧，避免串口积压时突发转发
+	 * 多帧0x32/0x33到凌霄IMU和数传链路。
+	 */
 	static u8 pi_data[4];
-	if (Pi_GetData_Flag())
+	static u8 slam_read_divider = 0;
+
+	slam_read_divider++;
+	if (slam_read_divider >= 5U)
 	{
-		Pi_GetData(pi_data);
-		HorizontalControl_SetPosition(
-			(s16)((pi_data[0] << 8) | pi_data[1]),
-			(s16)((pi_data[2] << 8) | pi_data[3]));
+		slam_read_divider = 0;
+		if (Pi_GetData_Flag())
+		{
+			Pi_GetData(pi_data);
+			HorizontalControl_SetPosition(
+				(s16)((pi_data[0] << 8) | pi_data[1]),
+				(s16)((pi_data[2] << 8) | pi_data[3]));
+		}
 	}
 
 	UserTask_OneKeyCmd();
