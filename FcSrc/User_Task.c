@@ -10,6 +10,7 @@
 
 #define MISSION_HEIGHT_CM               50U
 #define TAKEOFF_STABILIZE_MS            3000U
+#define DIRECT_TAKEOFF_TIMEOUT_MS       10000U
 #define TARGET_CENTER_HOLD_MS           3500U
 #define USER_TASK_PERIOD_MS             20U
 #define HEIGHT_TOLERANCE_CM             5.0f
@@ -22,7 +23,7 @@
  * 1 wait for valid position and enter programmable mode
  * 2 wait for RC unlock
  * 3 wait after unlock
- * 4 take off to the contest cruise height
+ * 4 initialize direct 0x41 vertical-speed takeoff
  * 5 hold at 50 cm for three continuous seconds
  * 6 move forward 200 cm (X positive) and search for the target
  * 8 release the payload
@@ -37,12 +38,14 @@ static s16 mission_origin_x_cm = 0;
 static s16 mission_origin_y_cm = 0;
 static u8 visual_hold_initialized = 0;
 static u16 target_center_timer_ms = 0;
+static u16 takeoff_elapsed_ms = 0;
 
 static void UserTask_ResetMission(void)
 {
     mission_step = 0;
     visual_hold_initialized = 0U;
     target_center_timer_ms = 0U;
+    takeoff_elapsed_ms = 0U;
     MaixCam_SetMode(MAIXCAM_MODE_IDLE);
     VisionFollowControl_Reset();
     HorizontalControl_Reset();
@@ -54,6 +57,7 @@ static void UserTask_EnterLanding(void)
     mission_step = 9;
     visual_hold_initialized = 0U;
     target_center_timer_ms = 0U;
+    takeoff_elapsed_ms = 0U;
     MaixCam_SetMode(MAIXCAM_MODE_IDLE);
     VisionFollowControl_Reset();
     HorizontalControl_StopOutput();
@@ -162,16 +166,26 @@ void UserTask_OneKeyCmd(void)
         break;
 
     case 4:
-        if (OneKey_Takeoff(MISSION_HEIGHT_CM) != 0U)
-        {
-            MaixCam_SetMode(MAIXCAM_MODE_TRACKING);
-            mission_step = 5;
-        }
+        /*
+         * Do not start the LingXiao one-key takeoff command. From this
+         * point onward the 50 Hz height outer loop owns vertical motion
+         * and sends its requested climb speed through the 0x41 frame.
+         */
+        HeightControl_Reset();
+        takeoff_elapsed_ms = 0U;
+        MaixCam_SetMode(MAIXCAM_MODE_TRACKING);
+        mission_step = 5;
         break;
 
     case 5:
         HeightControl_Update((float)MISSION_HEIGHT_CM);
         HorizontalControl_Update();
+
+        if (takeoff_elapsed_ms <
+            DIRECT_TAKEOFF_TIMEOUT_MS + USER_TASK_PERIOD_MS)
+        {
+            takeoff_elapsed_ms += USER_TASK_PERIOD_MS;
+        }
 
         if (HorizontalControl_GetFaultCode() != 0)
         {
@@ -193,6 +207,10 @@ void UserTask_OneKeyCmd(void)
         else
         {
             state_timer_ms = 0;
+            if (takeoff_elapsed_ms >= DIRECT_TAKEOFF_TIMEOUT_MS)
+            {
+                UserTask_EnterLanding();
+            }
         }
         break;
 
