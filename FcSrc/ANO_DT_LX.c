@@ -49,6 +49,10 @@ void ANO_DT_Init(void)
 	dt.fun[0x32].fre_ms = 0;	  //0 由SLAM位置更新触发
 	dt.fun[0x32].time_cnt_ms = 0; //设置初始相位，单位1ms
 	//
+	dt.fun[0x33].D_Addr = 0xff;
+	dt.fun[0x33].fre_ms = 0;	  //0 由SLAM速度更新触发
+	dt.fun[0x33].time_cnt_ms = 0; //设置初始相位，单位1ms
+	//
 	dt.fun[0x34].D_Addr = 0xff;
 	dt.fun[0x34].fre_ms = 0;	  //0 由外部触发
 	dt.fun[0x34].time_cnt_ms = 0; //设置初始相位，单位1ms
@@ -335,6 +339,14 @@ static void Add_Send_Data(u8 frame_num, u8 *_cnt, u8 send_buffer[])
 		}
 	}
 	break;
+	case 0x33: //通用速度测量数据（由SLAM坐标估算）
+	{
+		for (u8 i = 0; i < 6; i++)
+		{
+			send_buffer[(*_cnt)++] = ext_sens.gen_vel.byte[i];
+		}
+	}
+	break;
 	case 0x34: //通用距离测量数据
 	{
 		//
@@ -542,6 +554,7 @@ void ANO_LX_Data_Exchange_Task(float dT_s)
 	//=====检测是否触发发送
 	Check_To_Send(0x30);
 	Check_To_Send(0x32);
+	Check_To_Send(0x33);
 	Check_To_Send(0x34);
 	Check_To_Send(0x40);
 	Check_To_Send(0x41);

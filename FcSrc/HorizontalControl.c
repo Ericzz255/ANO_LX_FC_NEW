@@ -18,6 +18,9 @@
 #define HORIZONTAL_HOLD_MAX_VEL_CMPS           20      /* 位置环输出最大速度(cm/s) */
 #define HORIZONTAL_HOLD_MAX_VEL_STEP_CMPS      4       /* 单周期速度增量限幅(cm/s) */
 #define HORIZONTAL_HOLD_SENSOR_TIMEOUT_MS      300U    /* 传感器超时时间(ms) */
+#define SLAM_READY_CONFIRM_MS                  3000U   /* 连续稳定后才允许使用SLAM */
+#define SLAM_READY_MAX_STEP_CM                 20      /* 初始化/飞行期间单帧最大跳变 */
+#define SLAM_READY_MAX_DRIFT_CM                10      /* 初始化窗口内允许的坐标漂移 */
 
 #define HORIZONTAL_HOLD_FAULT_NONE              0U
 #define HORIZONTAL_HOLD_FAULT_SENSOR_TIMEOUT    1U
@@ -30,6 +33,13 @@ static s16 hold_target_y = 0;
 static u8 slam_position_update_cnt = 0;
 static u8 slam_position_valid = 0;
 static u32 slam_last_update_ms = 0;
+static u8 slam_ready_candidate_valid = 0;
+static s16 slam_candidate_origin_x_cm = 0;
+static s16 slam_candidate_origin_y_cm = 0;
+static s16 slam_candidate_last_x_cm = 0;
+static s16 slam_candidate_last_y_cm = 0;
+static u32 slam_candidate_start_ms = 0;
+static u32 slam_candidate_last_ms = 0;
 
 typedef struct
 {
@@ -127,13 +137,86 @@ static s16 HorizontalControl_CalculateVelocity(s32 error_cm,
     return HorizontalControl_LimitVelocity(velocity_cmps);
 }
 
+static void HorizontalControl_BeginSlamQualification(s16 x_cm,
+                                                     s16 y_cm,
+                                                     u32 now_ms)
+{
+    slam_position_valid = 0;
+    slam_ready_candidate_valid = 1;
+    slam_candidate_origin_x_cm = x_cm;
+    slam_candidate_origin_y_cm = y_cm;
+    slam_candidate_last_x_cm = x_cm;
+    slam_candidate_last_y_cm = y_cm;
+    slam_candidate_start_ms = now_ms;
+    slam_candidate_last_ms = now_ms;
+}
+
 void HorizontalControl_SetPosition(s16 x_cm, s16 y_cm)
 {
+    u32 now_ms = GetSysRunTimeMs();
+    u32 sample_gap_ms;
+    s32 step_x_cm;
+    s32 step_y_cm;
+
     now_x = x_cm;
     now_y = y_cm;
+
+    if (slam_ready_candidate_valid == 0)
+    {
+        HorizontalControl_BeginSlamQualification(x_cm, y_cm, now_ms);
+        return;
+    }
+
+    sample_gap_ms = (u32)(now_ms - slam_candidate_last_ms);
+    step_x_cm = (s32)x_cm - (s32)slam_candidate_last_x_cm;
+    step_y_cm = (s32)y_cm - (s32)slam_candidate_last_y_cm;
+
+    if (sample_gap_ms > HORIZONTAL_HOLD_SENSOR_TIMEOUT_MS ||
+        HorizontalControl_AbsS32(step_x_cm) > SLAM_READY_MAX_STEP_CM ||
+        HorizontalControl_AbsS32(step_y_cm) > SLAM_READY_MAX_STEP_CM)
+    {
+        /*
+         * During initialization this restarts the three-second readiness
+         * window. If SLAM was already active, clearing valid makes the
+         * running horizontal controller enter its sensor-fault path.
+         */
+        HorizontalControl_BeginSlamQualification(x_cm, y_cm, now_ms);
+        return;
+    }
+
+    if (slam_position_valid == 0 &&
+        (HorizontalControl_AbsS32(
+             (s32)x_cm - (s32)slam_candidate_origin_x_cm) >
+             SLAM_READY_MAX_DRIFT_CM ||
+         HorizontalControl_AbsS32(
+             (s32)y_cm - (s32)slam_candidate_origin_y_cm) >
+             SLAM_READY_MAX_DRIFT_CM))
+    {
+        /*
+         * The aircraft is stationary before takeoff. Slow SLAM convergence
+         * or drift outside this box therefore restarts readiness timing.
+         */
+        HorizontalControl_BeginSlamQualification(x_cm, y_cm, now_ms);
+        return;
+    }
+
+    slam_candidate_last_x_cm = x_cm;
+    slam_candidate_last_y_cm = y_cm;
+    slam_candidate_last_ms = now_ms;
+
+    if (slam_position_valid == 0)
+    {
+        if ((u32)(now_ms - slam_candidate_start_ms) <
+            SLAM_READY_CONFIRM_MS)
+        {
+            return;
+        }
+
+        slam_position_valid = 1;
+    }
+
     slam_position_update_cnt++;
-    slam_last_update_ms = GetSysRunTimeMs();
-    slam_position_valid = 1;
+    slam_last_update_ms = now_ms;
     LX_FC_EXT_Sensor_SetSlamPosition(x_cm, y_cm);
 }
 
@@ -218,9 +301,23 @@ void HorizontalControl_Update(void)
     s16 target_vel_x;
     s16 target_vel_y;
 
-    if (fc_sta.fc_mode_sta != 2 || slam_position_valid == 0)
+    if (fc_sta.fc_mode_sta != 2)
     {
         HorizontalControl_StopOutput();
+        return;
+    }
+
+    if (slam_position_valid == 0)
+    {
+        if (horizontal_control.initialized != 0)
+        {
+            HorizontalControl_LatchFault(
+                HORIZONTAL_HOLD_FAULT_SENSOR_TIMEOUT);
+        }
+        else
+        {
+            HorizontalControl_StopOutput();
+        }
         return;
     }
 

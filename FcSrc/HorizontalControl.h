@@ -16,6 +16,7 @@ extern s16 now_y;
  * @brief 提交一帧新的SLAM水平位置。
  * @param x_cm 机头前后方向位置，机头前方为正，单位cm。
  * @param y_cm 机体左右方向位置，机体左侧为正，单位cm。
+ * @note  上电或数据中断后，需连续稳定更新3秒才会标记为有效。
  */
 void HorizontalControl_SetPosition(s16 x_cm, s16 y_cm);
 

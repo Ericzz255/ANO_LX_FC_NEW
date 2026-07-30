@@ -17,21 +17,142 @@
 ===========================================================================*/
 #include "LX_FC_EXT_Sensor.h"
 #include "Drv_AnoOf.h"
+#include "Drv_Sys.h"
 #include "ANO_DT_LX.h"
 
 _fc_ext_sensor_st ext_sens;
 
+#define SLAM_VELOCITY_WINDOW_MS          100U
+#define SLAM_VELOCITY_RESET_TIMEOUT_MS   300U
+#define SLAM_VELOCITY_FILTER_ALPHA       0.25f
+#define SLAM_VELOCITY_DEADBAND_CMPS      3.0f
+#define SLAM_VELOCITY_REJECT_CMPS        150.0f
+
+typedef struct
+{
+	u8 initialized;
+	s16 anchor_x_cm;
+	s16 anchor_y_cm;
+	u32 anchor_ms;
+	float filtered_x_cmps;
+	float filtered_y_cmps;
+} _slam_velocity_estimator_st;
+
+static _slam_velocity_estimator_st slam_velocity;
+
+static float SlamVelocity_Abs(float value)
+{
+	return (value >= 0.0f) ? value : -value;
+}
+
+static s16 SlamVelocity_RoundToS16(float value)
+{
+	if (value >= 0.0f)
+	{
+		return (s16)(value + 0.5f);
+	}
+
+	return (s16)(value - 0.5f);
+}
+
+static void SlamVelocity_Publish(void)
+{
+	float velocity_x_cmps = slam_velocity.filtered_x_cmps;
+	float velocity_y_cmps = slam_velocity.filtered_y_cmps;
+
+	if (SlamVelocity_Abs(velocity_x_cmps) <
+		SLAM_VELOCITY_DEADBAND_CMPS)
+	{
+		velocity_x_cmps = 0.0f;
+	}
+	if (SlamVelocity_Abs(velocity_y_cmps) <
+		SLAM_VELOCITY_DEADBAND_CMPS)
+	{
+		velocity_y_cmps = 0.0f;
+	}
+
+	ext_sens.gen_vel.st_data.hca_velocity_cmps[0] =
+		SlamVelocity_RoundToS16(velocity_x_cmps);
+	ext_sens.gen_vel.st_data.hca_velocity_cmps[1] =
+		SlamVelocity_RoundToS16(velocity_y_cmps);
+	ext_sens.gen_vel.st_data.hca_velocity_cmps[2] = (s16)0x8000;
+	dt.fun[0x33].WTS = 1;
+}
+
 /*
  * SLAM is a non-body-fixed position sensor. Feed its absolute X/Y position
- * to the LingXiao IMU through 0x32 instead of presenting optical flow as the
- * horizontal motion source through 0x33.
+ * to the LingXiao IMU through 0x32. Derive the 0x33 horizontal velocity from
+ * the same SLAM source so the LingXiao velocity loop remains available
+ * without using optical-flow motion data.
  */
 void LX_FC_EXT_Sensor_SetSlamPosition(s16 x_cm, s16 y_cm)
 {
+	u32 now_ms = GetSysRunTimeMs();
+	u32 elapsed_ms;
+
 	ext_sens.gen_pos.st_data.ulhca_pos_cm[0] = (s32)x_cm;
 	ext_sens.gen_pos.st_data.ulhca_pos_cm[1] = (s32)y_cm;
 	ext_sens.gen_pos.st_data.ulhca_pos_cm[2] = (s32)0x80000000UL;
 	dt.fun[0x32].WTS = 1;
+
+	if (slam_velocity.initialized == 0U)
+	{
+		slam_velocity.initialized = 1U;
+		slam_velocity.anchor_x_cm = x_cm;
+		slam_velocity.anchor_y_cm = y_cm;
+		slam_velocity.anchor_ms = now_ms;
+		slam_velocity.filtered_x_cmps = 0.0f;
+		slam_velocity.filtered_y_cmps = 0.0f;
+		SlamVelocity_Publish();
+		return;
+	}
+
+	elapsed_ms = (u32)(now_ms - slam_velocity.anchor_ms);
+
+	if (elapsed_ms > SLAM_VELOCITY_RESET_TIMEOUT_MS)
+	{
+		/*
+		 * A long gap invalidates the previous differentiation baseline.
+		 * Reinitialize at zero speed; subsequent fresh samples rebuild it.
+		 */
+		slam_velocity.anchor_x_cm = x_cm;
+		slam_velocity.anchor_y_cm = y_cm;
+		slam_velocity.anchor_ms = now_ms;
+		slam_velocity.filtered_x_cmps = 0.0f;
+		slam_velocity.filtered_y_cmps = 0.0f;
+	}
+	else if (elapsed_ms >= SLAM_VELOCITY_WINDOW_MS)
+	{
+		float raw_x_cmps =
+			(float)((s32)x_cm - (s32)slam_velocity.anchor_x_cm) *
+			1000.0f / (float)elapsed_ms;
+		float raw_y_cmps =
+			(float)((s32)y_cm - (s32)slam_velocity.anchor_y_cm) *
+			1000.0f / (float)elapsed_ms;
+
+		/*
+		 * A speed outside the mission envelope is treated as a SLAM
+		 * coordinate jump. Re-anchor without feeding the jump to the IMU.
+		 */
+		if (SlamVelocity_Abs(raw_x_cmps) <=
+				SLAM_VELOCITY_REJECT_CMPS &&
+			SlamVelocity_Abs(raw_y_cmps) <=
+				SLAM_VELOCITY_REJECT_CMPS)
+		{
+			slam_velocity.filtered_x_cmps +=
+				SLAM_VELOCITY_FILTER_ALPHA *
+				(raw_x_cmps - slam_velocity.filtered_x_cmps);
+			slam_velocity.filtered_y_cmps +=
+				SLAM_VELOCITY_FILTER_ALPHA *
+				(raw_y_cmps - slam_velocity.filtered_y_cmps);
+		}
+
+		slam_velocity.anchor_x_cm = x_cm;
+		slam_velocity.anchor_y_cm = y_cm;
+		slam_velocity.anchor_ms = now_ms;
+	}
+
+	SlamVelocity_Publish();
 }
 
 static inline void General_Distance_Data_Handle()
@@ -53,8 +174,8 @@ static inline void General_Distance_Data_Handle()
 void LX_FC_EXT_Sensor_Task(float dT_s) //1ms
 {
 	/*
-	 * Do not send optical-flow X/Y through 0x33. Horizontal motion
-	 * estimation is driven by SLAM position frames sent through 0x32.
+	 * Optical-flow X/Y is deliberately not used. Horizontal position and
+	 * velocity are both published when a fresh SLAM sample is received.
 	 */
 	//
 	General_Distance_Data_Handle();
