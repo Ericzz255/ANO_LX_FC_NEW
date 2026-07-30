@@ -81,6 +81,13 @@ extern _fc_ext_sensor_st ext_sens;
 //static
 
 //public
+/**
+ * @brief Send one SLAM position sample to the LingXiao IMU.
+ * @note  X/Y are in the fixed SLAM frame aligned with the aircraft body
+ *        frame at unlock. Z is not supplied by SLAM and is marked invalid.
+ */
+void LX_FC_EXT_Sensor_SetSlamPosition(s16 x_cm, s16 y_cm);
+
 void LX_FC_EXT_Sensor_Task(float dT_s);
 
 #endif

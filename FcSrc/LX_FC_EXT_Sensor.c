@@ -21,43 +21,17 @@
 
 _fc_ext_sensor_st ext_sens;
 
-//这里把光流数据打包成通用速度传感器数据
-static inline void General_Velocity_Data_Handle()
+/*
+ * SLAM is a non-body-fixed position sensor. Feed its absolute X/Y position
+ * to the LingXiao IMU through 0x32 instead of presenting optical flow as the
+ * horizontal motion source through 0x33.
+ */
+void LX_FC_EXT_Sensor_SetSlamPosition(s16 x_cm, s16 y_cm)
 {
-	static u8 of_update_cnt, of_alt_update_cnt;
-	static u8 dT_ms = 0;
-	//每一毫秒dT_ms+1，用来判断是否长时间无数据
-	if (dT_ms != 255)
-	{
-		dT_ms++;
-	}
-	//检查OF数据是否更新
-	if (of_update_cnt != ano_of.of_update_cnt)
-	{
-		of_update_cnt = ano_of.of_update_cnt;
-		//XY_VEL
-		if (ano_of.of1_sta && ano_of.work_sta) //光流有效
-		{
-			ext_sens.gen_vel.st_data.hca_velocity_cmps[0] = ano_of.of1_dx;
-			ext_sens.gen_vel.st_data.hca_velocity_cmps[1] = ano_of.of1_dy;
-		}
-		else //无效
-		{
-			ext_sens.gen_vel.st_data.hca_velocity_cmps[0] = 0x8000;
-			ext_sens.gen_vel.st_data.hca_velocity_cmps[1] = 0x8000;
-		}
-	}
-	if (of_alt_update_cnt != ano_of.alt_update_cnt)
-	{
-		//
-		of_alt_update_cnt = ano_of.alt_update_cnt;
-		//不输入z轴速度，将z速度赋值为无效
-		ext_sens.gen_vel.st_data.hca_velocity_cmps[2] = 0x8000;
-		//触发发送
-		dt.fun[0x33].WTS = 1;
-		//reset
-		dT_ms = 0;
-	}
+	ext_sens.gen_pos.st_data.ulhca_pos_cm[0] = (s32)x_cm;
+	ext_sens.gen_pos.st_data.ulhca_pos_cm[1] = (s32)y_cm;
+	ext_sens.gen_pos.st_data.ulhca_pos_cm[2] = (s32)0x80000000UL;
+	dt.fun[0x32].WTS = 1;
 }
 
 static inline void General_Distance_Data_Handle()
@@ -78,8 +52,10 @@ static inline void General_Distance_Data_Handle()
 
 void LX_FC_EXT_Sensor_Task(float dT_s) //1ms
 {
-	//
-	General_Velocity_Data_Handle();
+	/*
+	 * Do not send optical-flow X/Y through 0x33. Horizontal motion
+	 * estimation is driven by SLAM position frames sent through 0x32.
+	 */
 	//
 	General_Distance_Data_Handle();
 }

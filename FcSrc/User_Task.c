@@ -8,7 +8,7 @@
 #include "MaixCam.h"
 #include "Drv_PwmOut.h"
 
-#define MISSION_HEIGHT_CM               90U
+#define MISSION_HEIGHT_CM               50U
 #define TAKEOFF_STABILIZE_MS            3000U
 #define TARGET_CENTER_HOLD_MS           3500U
 #define USER_TASK_PERIOD_MS             20U
@@ -23,7 +23,7 @@
  * 2 wait for RC unlock
  * 3 wait after unlock
  * 4 take off to the contest cruise height
- * 5 hold at 90 cm for three continuous seconds
+ * 5 hold at 50 cm for three continuous seconds
  * 6 move forward 200 cm (X positive) and search for the target
  * 8 release the payload
  * 9 land

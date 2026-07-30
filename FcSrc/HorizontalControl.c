@@ -1,6 +1,7 @@
 #include "HorizontalControl.h"
 #include "ANO_LX.h"
 #include "Drv_Sys.h"
+#include "LX_FC_EXT_Sensor.h"
 #include "LX_FC_State.h"
 
 /*
@@ -133,6 +134,7 @@ void HorizontalControl_SetPosition(s16 x_cm, s16 y_cm)
     slam_position_update_cnt++;
     slam_last_update_ms = GetSysRunTimeMs();
     slam_position_valid = 1;
+    LX_FC_EXT_Sensor_SetSlamPosition(x_cm, y_cm);
 }
 
 u8 HorizontalControl_HasValidPosition(void)
