@@ -1,48 +1,52 @@
-# MaixCAM - 飞控视觉通信协议 V1.0
+# MaixCAM 当前程序与飞控的 UART1 协议
 
-本文件与 MaixCAM 端冻结版 `MAIXCAM_FLIGHT_CONTROLLER_PROTOCOL_V1.0.md`
-保持一致。V1.0 只提供四 AprilTag 小车靶心的跟踪误差，不提供场地绝对
-定位；`TYPE 0x02` 为保留类型，双方不得发送。
+本文件对应 MaixCAM `main.py` 当前实现。MaixCAM 单向发送视觉结果，
+飞控不再要求模式命令应答；任务代码中的 `MaixCam_SetMode()` 仅作为
+飞控本地视觉接管门控。
 
 ## 硬件与串口
 
-- 电平：3.3 V TTL，禁止向 MaixCAM 输入 5 V
-- 波特率：115200 bit/s
-- 格式：8-N-1，无流控
+- 电平：3.3 V TTL
+- 参数：115200 bit/s、8-N-1、无流控
 - MaixCAM：UART1 A19/TX、A18/RX
 - 飞控：USART1 PA9/TX、PA10/RX
+- 发送频率：最高 20 Hz
 
 ```text
 MaixCAM A19 / UART1_TX  -> 飞控 PA10 / USART1_RX
-MaixCAM A18 / UART1_RX  <- 飞控 PA9  / USART1_TX
 MaixCAM GND             --- 飞控 GND
 ```
+
+当前 MaixCAM 程序不读取串口，因此 A18/RX 与飞控 PA9/TX 不参与协议。
 
 ## 通用帧
 
 ```text
-AA 4D TYPE LEN PAYLOAD[LEN] CRC16_LO CRC16_HI
+AA 5A TYPE LEN PAYLOAD[LEN] CRC16_LO CRC16_HI
 ```
 
-- 多字节整数为小端序。
-- `LEN` 最大为 32。
-- 相邻字节间隔超过 50 ms 时接收状态机复位。
-- CRC 为 CRC-16/CCITT-FALSE：初值 `0xFFFF`，多项式 `0x1021`，
-  不反射，无最终异或。
-- CRC 覆盖 `TYPE + LEN + PAYLOAD`，不覆盖帧头。
+- `TYPE=0x21`
+- `LEN=13`
+- 总帧长固定为 19 字节
+- 多字节整数为小端序
+- CRC 为 CRC-16/CCITT-FALSE：初值 `0xFFFF`、多项式 `0x1021`、
+  不反射、无最终异或
+- CRC 覆盖 `TYPE + LEN + PAYLOAD`，不覆盖帧头
+- 飞控相邻字节超时为 50 ms，控制数据帧龄上限为 150 ms
+- 最近300 ms内收到序号正常的合法帧时，通信链路状态为在线
 
-## TYPE 0x01：跟踪结果
-
-方向：MaixCAM -> 飞控；固定 20 Hz；Payload 固定 8 字节。
+## 视觉 Payload
 
 | 偏移 | 字段 | 类型 | 说明 |
 |---:|---|---|---|
-| 0 | SEQ | uint8 | 每帧递增，包含无效帧 |
+| 0 | SEQ | uint8 | 每帧递增，0~255循环 |
 | 1 | FLAGS | uint8 | 视觉状态位 |
-| 2 | ERROR_X_E4 | int16 | 机体系前向归一化光学误差，前方为正 |
-| 4 | ERROR_Y_E4 | int16 | 机体系横向归一化光学误差，左方为正 |
-| 6 | QUALITY | uint8 | V1.0 有效时 255，无效时 0 |
-| 7 | TAG_MASK | uint8 | 四个配置槽位的检测位图 |
+| 2 | CENTER_X | uint16 | 原图目标中心X像素 |
+| 4 | CENTER_Y | uint16 | 原图目标中心Y像素 |
+| 6 | ERROR_X_E4 | int16 | 机体系前向归一化误差，前方为正 |
+| 8 | ERROR_Y_E4 | int16 | 机体系横向归一化误差，左方为正 |
+| 10 | TAG_MASK | uint8 | Tag ID 0~7检测位图 |
+| 11 | FPS_X10 | uint16 | 图像帧率乘10 |
 
 误差换算：
 
@@ -51,74 +55,62 @@ error_x = (float)ERROR_X_E4 / 10000.0f;
 error_y = (float)ERROR_Y_E4 / 10000.0f;
 ```
 
-它们不是像素、厘米或速度指令，必须经过带限幅的控制器。
+## FLAGS
 
-### FLAGS
-
-| 位 | 名称 | 说明 |
+| 位 | 名称 | 飞控处理 |
 |---:|---|---|
-| bit0 | TARGET_VALID | 当前结果可用于控制 |
-| bit1 | ALL_FOUR | 四个配置标签全部识别 |
-| bit2 | CALIBRATED | 相机标定已加载 |
-| bit3 | HELD | 仅显示用旧结果，不可控制 |
-| bit4~7 | RESERVED | 必须为 0 |
+| bit0 | TARGET_VALID | 必须为1 |
+| bit1 | ALL_FOUR | 四码中心可用于控制 |
+| bit2 | CALIBRATED | 必须为1 |
+| bit3 | HELD | 拒绝控制 |
+| bit4 | SEARCH_ACTIVE | 拒绝控制 |
+| bit5 | PARTIAL_CENTERED | 拒绝控制 |
+| bit6 | DIAGONAL_TRACK | 有效对角码中心可用于控制 |
+| bit7 | RESERVED | 必须为0 |
 
-飞控只在以下条件全部满足时发布有效跟踪数据：
+飞控接受以下两种几何状态：
 
-```text
-(FLAGS & 0x0F) == 0x07
-FLAGS bit4~7 == 0
-QUALITY == 255
-TAG_MASK == 0x0F
-SEQ 不重复
-帧龄 <= 150 ms
-模式 0x81 应答确认当前为 MODE=1
-CRC、TYPE、LEN 和协议自检均正确
-```
+1. `ALL_FOUR=1`、`DIAGONAL_TRACK=0`、`TAG_MASK=0x0F`；
+2. `ALL_FOUR=0`、`DIAGONAL_TRACK=1`，且掩码包含对角组合
+   ID 1+2（`0x06`）或 ID 0+3（`0x09`）。
 
-任一条件不满足时立即停止使用视觉误差，后续控制器必须将视觉修正速度
-置零、清除视觉积分并保持飞控自身定点。
+两种状态都必须同时满足 `TARGET_VALID=1`、`CALIBRATED=1`、
+`HELD/SEARCH_ACTIVE/PARTIAL_CENTERED=0`、CRC正确、序号不重复、
+帧龄不超过150 ms，并且任务已打开本地跟踪门控。
 
-固定测试向量：
+## 无码心跳
 
-```text
-AA 4D 01 08 01 07 E8 03 0C FE FF 0F CD D4
-```
-
-对应 `ERROR_X_E4=+1000`、`ERROR_Y_E4=-500`、CRC=`0xD4CD`。
-
-## TYPE 0x80：设置视觉模式
-
-方向：飞控 -> MaixCAM；Payload 固定 2 字节。
-
-| 偏移 | 字段 | 说明 |
-|---:|---|---|
-| 0 | SEQ | 命令序号 |
-| 1 | MODE | 0=空闲，1=小车跟踪；其他值非法 |
-
-飞控每 500 ms 重发当前请求模式，以便 MaixCAM 重启后自动恢复。
-
-固定测试向量：
+没有目标时，MaixCAM仍以最高20 Hz发送合法帧：
 
 ```text
-AA 4D 80 02 10 01 CA 24
+CENTER_X = 0xFFFF
+CENTER_Y = 0xFFFF
+ERROR_X_E4 = 0
+ERROR_Y_E4 = 0
+TAG_MASK = 0
+TARGET_VALID = 0
 ```
 
-## TYPE 0x81：模式状态/应答
+`CALIBRATED=1`只表示标定已加载，不代表当前检测有效。飞控会正常解析
+无码心跳、刷新通信统计，同时保持视觉控制无效。
 
-方向：MaixCAM -> 飞控；Payload 固定 4 字节。
-
-| 偏移 | 字段 | 说明 |
-|---:|---|---|
-| 0 | COMMAND_SEQ | 被应答的 0x80 命令序号 |
-| 1 | CURRENT_MODE | 当前模式 |
-| 2 | RESULT | 0=接受，1=不支持，2=忙 |
-| 3 | PROTOCOL_MAJOR | 固定为 1 |
-
-只有命令序号、模式、结果和协议主版本全部匹配，飞控才确认视觉模式。
-
-固定测试向量：
+固定无码测试向量：
 
 ```text
-AA 4D 81 04 10 01 00 01 20 2A
+AA 5A 21 0D 02 04 FF FF FF FF 00 00 00 00 00 C8 00 16 C4
 ```
+
+## 固定测试向量
+
+```text
+AA 5A 21 0D 01 07 40 01 F0 00 E8 03 0C FE 0F C8 00 0B 22
+```
+
+对应：
+
+- 中心 `(320, 240)`
+- `ERROR_X_E4=+1000`
+- `ERROR_Y_E4=-500`
+- `TAG_MASK=0x0F`
+- `FPS_X10=200`
+- CRC=`0x220B`

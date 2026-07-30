@@ -2,6 +2,7 @@
 #include "ANO_LX.h"
 #include "Drv_Uart.h"
 #include "HorizontalControl.h"
+#include "MaixCam.h"
 #include "User_Task.h"
 
 #define USER_DATA_DEST_ADDR   HW_ALL
@@ -23,6 +24,12 @@ static void UserDataTransfer_FillPayloadF1(u8 *buffer, u8 *cnt)
     /* USERDATA3: 1 while mission step 10 owns horizontal control. */
     UserData_PutS16(buffer, cnt,
                     (UserTask_GetMissionStep() == 10U) ? 1 : 0);
+    /* USERDATA4: 1 after SLAM position initialization while data is fresh. */
+    UserData_PutS16(buffer, cnt,
+                    HorizontalControl_HasValidPosition() ? 1 : 0);
+    /* USERDATA5: 1 when valid MaixCAM frames remain fresh. */
+    UserData_PutS16(buffer, cnt,
+                    MaixCam_IsLinkAlive() ? 1 : 0);
 }
 
 static void UserDataTransfer_SendFrame(u8 frame_id,

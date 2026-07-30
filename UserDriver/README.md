@@ -1,4 +1,4 @@
-# D题飞控备赛代码说明
+++*-# D题飞控备赛代码说明
 
 本工程正在从上一届网格巡查任务切换到“陆空协同无人机系统（D题）”。已移除固定禁飞区、9×7 网格覆盖、BFS/蛇形路径、航点进度和相关串口命令。
 
@@ -7,7 +7,7 @@
 - USART3 接收外部定位坐标，并送入水平位置闭环。
 - 高度控制和水平定点控制。
 - USART2 以 20 Hz 向 Linux 地面站发送无人机位置、速度、高度、电压、偏航角和任务状态，并解析地面站上行帧、记录链路状态和错误计数。
-- USART1 接收 MaixCAM 的四 AprilTag 小车靶心跟踪误差，只传结构化数据，不传输图像；V1.0 不提供场地绝对定位。
+- USART1 接收 MaixCAM 的 AprilTag 小车靶心跟踪帧，只传结构化数据，不传输图像；支持四码中心和有效对角码中心。
 - IOA3/PB0 电磁铁 MOSFET 输出，用于软质物体抛投。
 - 一键起飞、降落和飞控状态接口。
 
@@ -47,7 +47,7 @@ CH6 低位保留为台架安全降落。比赛正式流程不能依赖遥控器�
 | `UserDriver/Usart3_Pi.c` | 外部定位数据接收 |
 | `UserDriver/LinuxTelemetry.c` | 地面站无人机遥测 |
 | `UserDriver/GroundStationRx.c` | 地面站上行帧解析与链路诊断 |
-| `UserDriver/MaixCam.c` | MaixCAM 跟踪误差解析、模式命令和失效保护 |
+| `UserDriver/MaixCam.c` | MaixCAM 当前 `AA 5A/0x21` 跟踪帧解析、本地模式门控和失效保护 |
 | `UserDriver/MAIXCAM_UART1_PROTOCOL.md` | MaixCAM 与飞控的串口协议 |
 | `UserDriver/LINUX_UART2_PROTOCOL.md` | 当前 USART2 遥测格式 |
 | `DriversMcu/STM32F407/Drivers/Drv_PwmOut.c` | 电机 PWM 与抛投电磁铁输出 |
