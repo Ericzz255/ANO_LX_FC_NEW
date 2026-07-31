@@ -409,16 +409,12 @@ void UserTask_OneKeyCmd(void)
         return;
     }
 
-    /* CH6 low: manual landing for bench safety. */
+    /* CH6 low: capture and hold the current position and altitude. */
     if (ch6 > 800 && ch6 < 1200)
     {
-        UserTask_ResetMission();
-        if (land_command_sent == 0)
-        {
-            land_command_sent = OneKey_Land();
-        }
-        mission_step = 0;
+        land_command_sent = 0;
         state_timer_ms = 0;
+        UserTask_ManualHold();
         return;
     }
 
