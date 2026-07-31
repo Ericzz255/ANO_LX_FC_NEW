@@ -30,7 +30,7 @@ u8 All_Init()
 	CarPoseXyUart_Init();
 	DrvUart1Init(115200);
 	//串口2初始化，接入地面站
-	DrvUart2Init(115200);
+	DrvUart2Init(500000);
 	//串口3初始化,接树莓派,接收雷达数据
 	DrvUart3Init(115200);
 	//接匿名光流
