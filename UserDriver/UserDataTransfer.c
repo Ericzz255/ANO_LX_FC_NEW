@@ -28,6 +28,22 @@ static s16 UserData_ClampS32ToS16(s32 value)
     return (s16)value;
 }
 
+static s16 UserData_MmToCm(s32 value_mm)
+{
+    s32 value_cm;
+
+    if (value_mm >= 0)
+    {
+        value_cm = (value_mm + 5L) / 10L;
+    }
+    else
+    {
+        value_cm = (value_mm - 5L) / 10L;
+    }
+
+    return UserData_ClampS32ToS16(value_cm);
+}
+
 static void UserDataTransfer_FillPayloadF1(u8 *buffer, u8 *cnt)
 {
     car_pose_xy_t car_pose;
@@ -44,13 +60,13 @@ static void UserDataTransfer_FillPayloadF1(u8 *buffer, u8 *cnt)
     /* USERDATA5: 1 while structure- and CRC-valid UART1 frames arrive. */
     UserData_PutS16(buffer, cnt,
                     CarPoseXyUart_IsLinkAlive() ? 1 : 0);
-    /* USERDATA6..7: current valid vehicle position, millimetres. */
+    /* USERDATA6..7: current valid vehicle position, centimetres. */
     UserData_PutS16(buffer, cnt,
                     car_pose_valid ?
-                    UserData_ClampS32ToS16(car_pose.x_mm) : 0);
+                    UserData_MmToCm(car_pose.x_mm) : 0);
     UserData_PutS16(buffer, cnt,
                     car_pose_valid ?
-                    UserData_ClampS32ToS16(car_pose.y_mm) : 0);
+                    UserData_MmToCm(car_pose.y_mm) : 0);
 }
 
 static void UserDataTransfer_SendFrame(u8 frame_id,
