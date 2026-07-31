@@ -11,7 +11,7 @@
 #include "Usart3_Pi.h"
 #include "UserDataTransfer.h"
 #include "LinuxTelemetry.h"
-#include "MaixCam.h"
+#include "CarPoseXyUart.h"
 #include "ANO_LX.h"
 //////////////////////////////////////////////////////////////////////
 //用户程序调度器
@@ -69,13 +69,24 @@ static void Loop_50Hz(void) //20ms执行一次
 	}
 
 	UserTask_OneKeyCmd();
+	CarPoseXyUart_Task();
 	//////////////////////////////////////////////////////////////////////
 }
 
 static void Loop_20Hz(void) //50ms执行一次
 {
-	MaixCam_Task();
-	UserDataTransfer_Task();
+	/*
+	 * USERDATA1/2 originate from the 10 Hz SLAM stream.  Sending the same
+	 * diagnostics twice per sample adds UART5 traffic without new information.
+	 */
+	static u8 user_data_divider = 0U;
+
+	user_data_divider++;
+	if (user_data_divider >= 2U)
+	{
+		user_data_divider = 0U;
+		UserDataTransfer_Task();
+	}
 	LinuxTelemetry_Send();
 }
 

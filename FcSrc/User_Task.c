@@ -4,50 +4,169 @@
 #include "LX_FC_State.h"
 #include "Highcontroll.h"
 #include "HorizontalControl.h"
-#include "VisionFollowControl.h"
-#include "MaixCam.h"
+#include "CarPoseXyUart.h"
 #include "Drv_PwmOut.h"
 
-#define MISSION_HEIGHT_CM               50U
+#define MISSION_HEIGHT_CM               80U
 #define TAKEOFF_STABILIZE_MS            3000U
-#define DIRECT_TAKEOFF_TIMEOUT_MS       10000U
-#define TARGET_CENTER_HOLD_MS           3500U
 #define USER_TASK_PERIOD_MS             20U
 #define HEIGHT_TOLERANCE_CM             5.0f
-#define POSITION_TOLERANCE_CM           5
-#define FORWARD_OFFSET_X_CM             200
+#define CAR_START_FORWARD_OFFSET_MM      500L
+#define CAR_START_RIGHT_OFFSET_MM        375L
 
 /*
  * Bench-test mission skeleton for the D problem:
  * 0 idle
- * 1 wait for valid position and enter programmable mode
+ * 1 capture aircraft/car origins, then enter programmable mode
  * 2 wait for RC unlock
  * 3 wait after unlock
- * 4 initialize direct 0x41 vertical-speed takeoff
- * 5 hold at 50 cm for three continuous seconds
- * 6 move forward 200 cm (X positive) and search for the target
- * 8 release the payload
+ * 4 take off to the contest cruise height
+ * 5 hold at 80 cm for three continuous seconds
+ * 6 continuously follow the latest valid vehicle X/Y coordinates
+ * 8 reserved for a future payload-release trigger
  * 9 land
- * 10 keep over the target; land after 3.5 s continuously centered
  *
  * CH6 is only a bench trigger; the contest start command will later come
  * from the vehicle over the wireless link.
  */
 static u8 mission_step = 0;
+static u8 car_target_active = 0U;
+static u8 car_origin_captured = 0U;
+static u32 last_car_update_count = 0U;
 static s16 mission_origin_x_cm = 0;
 static s16 mission_origin_y_cm = 0;
-static u8 visual_hold_initialized = 0;
-static u16 target_center_timer_ms = 0;
-static u16 takeoff_elapsed_ms = 0;
+static s32 car_origin_x_mm = 0L;
+static s32 car_origin_y_mm = 0L;
+
+static s16 UserTask_MmToCm(s32 value_mm)
+{
+    s32 value_cm;
+
+    if (value_mm >= 0)
+    {
+        value_cm = (value_mm + 5L) / 10L;
+    }
+    else
+    {
+        value_cm = (value_mm - 5L) / 10L;
+    }
+
+    if (value_cm > 32767L)
+    {
+        value_cm = 32767L;
+    }
+    else if (value_cm < -32768L)
+    {
+        value_cm = -32768L;
+    }
+
+    return (s16)value_cm;
+}
+
+static s16 UserTask_ClampToS16(s32 value)
+{
+    if (value > 32767L)
+    {
+        return 32767;
+    }
+    if (value < -32768L)
+    {
+        return (s16)-32768;
+    }
+    return (s16)value;
+}
+
+static u8 UserTask_CaptureCarOrigin(void)
+{
+    car_pose_xy_t pose;
+
+    if (car_origin_captured != 0U)
+    {
+        return SET;
+    }
+
+    if (CarPoseXyUart_GetPose(&pose) == RESET)
+    {
+        return RESET;
+    }
+
+    car_origin_x_mm = pose.x_mm;
+    car_origin_y_mm = pose.y_mm;
+    car_origin_captured = 1U;
+    return SET;
+}
+
+/*
+ * Use only the vehicle's field-frame X/Y. Yaw and velocity are deliberately
+ * ignored. When the 150 ms validity window expires, capture the aircraft's
+ * current SLAM position once so an old vehicle coordinate cannot keep pulling
+ * the aircraft.
+ */
+static u8 UserTask_UpdateCarTarget(void)
+{
+    car_pose_xy_t pose;
+    s32 relative_x_mm;
+    s32 relative_y_mm;
+    s32 target_x_cm;
+    s32 target_y_cm;
+
+    if (car_origin_captured == 0U ||
+        CarPoseXyUart_GetPose(&pose) == RESET)
+    {
+        if (car_target_active != 0U)
+        {
+            HorizontalControl_CaptureTarget();
+            car_target_active = 0U;
+        }
+        return RESET;
+    }
+
+    if (car_target_active != 0U &&
+        pose.update_count == last_car_update_count)
+    {
+        return SET;
+    }
+
+    /*
+     * At mission start the vehicle is 50 cm forward and 37.5 cm right
+     * of the aircraft. In the shared X-forward/Y-left convention:
+     * vehicle_start = aircraft_start + (+500 mm, -375 mm).
+     */
+    relative_x_mm =
+        pose.x_mm - car_origin_x_mm +
+        CAR_START_FORWARD_OFFSET_MM;
+    relative_y_mm =
+        pose.y_mm - car_origin_y_mm -
+        CAR_START_RIGHT_OFFSET_MM;
+    target_x_cm =
+        (s32)mission_origin_x_cm +
+        (s32)UserTask_MmToCm(relative_x_mm);
+    target_y_cm =
+        (s32)mission_origin_y_cm +
+        (s32)UserTask_MmToCm(relative_y_mm);
+
+    if (HorizontalControl_SetTarget(
+            UserTask_ClampToS16(target_x_cm),
+            UserTask_ClampToS16(target_y_cm)) == 0U)
+    {
+        return RESET;
+    }
+
+    last_car_update_count = pose.update_count;
+    car_target_active = 1U;
+    return SET;
+}
 
 static void UserTask_ResetMission(void)
 {
     mission_step = 0;
-    visual_hold_initialized = 0U;
-    target_center_timer_ms = 0U;
-    takeoff_elapsed_ms = 0U;
-    MaixCam_SetMode(MAIXCAM_MODE_IDLE);
-    VisionFollowControl_Reset();
+    car_target_active = 0U;
+    car_origin_captured = 0U;
+    last_car_update_count = 0U;
+    mission_origin_x_cm = 0;
+    mission_origin_y_cm = 0;
+    car_origin_x_mm = 0L;
+    car_origin_y_mm = 0L;
     HorizontalControl_Reset();
     HeightControl_Reset();
 }
@@ -55,29 +174,9 @@ static void UserTask_ResetMission(void)
 static void UserTask_EnterLanding(void)
 {
     mission_step = 9;
-    visual_hold_initialized = 0U;
-    target_center_timer_ms = 0U;
-    takeoff_elapsed_ms = 0U;
-    MaixCam_SetMode(MAIXCAM_MODE_IDLE);
-    VisionFollowControl_Reset();
+    car_target_active = 0U;
     HorizontalControl_StopOutput();
     HeightControl_Reset();
-}
-
-static u8 UserTask_TryEnterVisualFollow(void)
-{
-    maixcam_tracking_t tracking;
-
-    if (MaixCam_GetTracking(&tracking) == RESET)
-    {
-        return RESET;
-    }
-
-    VisionFollowControl_Begin();
-    visual_hold_initialized = 0U;
-    target_center_timer_ms = 0U;
-    mission_step = 10;
-    return SET;
 }
 
 u8 UserTask_GetMissionStep(void)
@@ -102,8 +201,6 @@ void UserTask_OneKeyCmd(void)
     /* CH6 low: manual landing for bench safety. */
     if (ch6 > 800 && ch6 < 1200)
     {
-        MaixCam_SetMode(MAIXCAM_MODE_IDLE);
-        VisionFollowControl_Reset();
         HorizontalControl_StopOutput();
         HeightControl_Reset();
         if (land_command_sent == 0)
@@ -136,7 +233,8 @@ void UserTask_OneKeyCmd(void)
     switch (mission_step)
     {
     case 1:
-        if (HorizontalControl_HasValidPosition() &&
+        if (UserTask_CaptureCarOrigin() != RESET &&
+            HorizontalControl_HasValidPosition() &&
             LX_Change_Mode(2))
         {
             HorizontalControl_Reset();
@@ -166,26 +264,15 @@ void UserTask_OneKeyCmd(void)
         break;
 
     case 4:
-        /*
-         * Do not start the LingXiao one-key takeoff command. From this
-         * point onward the 50 Hz height outer loop owns vertical motion
-         * and sends its requested climb speed through the 0x41 frame.
-         */
-        HeightControl_Reset();
-        takeoff_elapsed_ms = 0U;
-        MaixCam_SetMode(MAIXCAM_MODE_TRACKING);
-        mission_step = 5;
+        if (OneKey_Takeoff(MISSION_HEIGHT_CM) != 0U)
+        {
+            mission_step = 5;
+        }
         break;
 
     case 5:
         HeightControl_Update((float)MISSION_HEIGHT_CM);
         HorizontalControl_Update();
-
-        if (takeoff_elapsed_ms <
-            DIRECT_TAKEOFF_TIMEOUT_MS + USER_TASK_PERIOD_MS)
-        {
-            takeoff_elapsed_ms += USER_TASK_PERIOD_MS;
-        }
 
         if (HorizontalControl_GetFaultCode() != 0)
         {
@@ -194,11 +281,13 @@ void UserTask_OneKeyCmd(void)
         else if (HeightControl_TargetReached((float)MISSION_HEIGHT_CM,
                                              HEIGHT_TOLERANCE_CM))
         {
-            state_timer_ms += USER_TASK_PERIOD_MS;
+            if (state_timer_ms < TAKEOFF_STABILIZE_MS)
+            {
+                state_timer_ms += USER_TASK_PERIOD_MS;
+            }
+
             if (state_timer_ms >= TAKEOFF_STABILIZE_MS &&
-                HorizontalControl_SetTarget(
-                    (s16)(mission_origin_x_cm + FORWARD_OFFSET_X_CM),
-                    mission_origin_y_cm))
+                UserTask_UpdateCarTarget() != RESET)
             {
                 state_timer_ms = 0;
                 mission_step = 6;
@@ -207,29 +296,16 @@ void UserTask_OneKeyCmd(void)
         else
         {
             state_timer_ms = 0;
-            if (takeoff_elapsed_ms >= DIRECT_TAKEOFF_TIMEOUT_MS)
-            {
-                UserTask_EnterLanding();
-            }
         }
         break;
 
     case 6:
         HeightControl_Update((float)MISSION_HEIGHT_CM);
-        if (UserTask_TryEnterVisualFollow() != RESET)
-        {
-            VisionFollowControl_Update();
-            break;
-        }
-
+        UserTask_UpdateCarTarget();
         HorizontalControl_Update();
         if (HorizontalControl_GetFaultCode() != 0)
         {
             UserTask_EnterLanding();
-        }
-        else if (HorizontalControl_TargetReached(POSITION_TOLERANCE_CM))
-        {
-            mission_step = 8;
         }
         break;
 
@@ -244,42 +320,6 @@ void UserTask_OneKeyCmd(void)
         if (land_command_sent == 0)
         {
             land_command_sent = OneKey_Land();
-        }
-        break;
-
-    case 10:
-        HeightControl_Update((float)MISSION_HEIGHT_CM);
-        if (VisionFollowControl_Update() != RESET)
-        {
-            visual_hold_initialized = 0U;
-            if (VisionFollowControl_IsTargetCentered() != RESET)
-            {
-                target_center_timer_ms += USER_TASK_PERIOD_MS;
-                if (target_center_timer_ms >= TARGET_CENTER_HOLD_MS)
-                {
-                    UserTask_EnterLanding();
-                }
-            }
-            else
-            {
-                target_center_timer_ms = 0U;
-            }
-        }
-        else
-        {
-            target_center_timer_ms = 0U;
-            if (visual_hold_initialized == 0U)
-            {
-                HorizontalControl_Reset();
-                HorizontalControl_CaptureTarget();
-                visual_hold_initialized = 1U;
-            }
-
-            HorizontalControl_Update();
-            if (HorizontalControl_GetFaultCode() != 0)
-            {
-                UserTask_EnterLanding();
-            }
         }
         break;
 

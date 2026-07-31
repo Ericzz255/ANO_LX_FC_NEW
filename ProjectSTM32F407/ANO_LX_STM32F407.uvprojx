@@ -485,16 +485,6 @@
               <FileType>5</FileType>
               <FilePath>..\FcSrc\HorizontalControl.h</FilePath>
             </File>
-            <File>
-              <FileName>VisionFollowControl.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\FcSrc\VisionFollowControl.c</FilePath>
-            </File>
-            <File>
-              <FileName>VisionFollowControl.h</FileName>
-              <FileType>5</FileType>
-              <FilePath>..\FcSrc\VisionFollowControl.h</FilePath>
-            </File>
           </Files>
         </Group>
         <Group>
@@ -756,19 +746,19 @@
               <FilePath>..\UserDriver\GroundStationRx.h</FilePath>
             </File>
             <File>
-              <FileName>MaixCam.c</FileName>
+              <FileName>CarPoseXyUart.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\UserDriver\MaixCam.c</FilePath>
+              <FilePath>..\UserDriver\CarPoseXyUart.c</FilePath>
             </File>
             <File>
-              <FileName>MaixCam.h</FileName>
+              <FileName>CarPoseXyUart.h</FileName>
               <FileType>5</FileType>
-              <FilePath>..\UserDriver\MaixCam.h</FilePath>
+              <FilePath>..\UserDriver\CarPoseXyUart.h</FilePath>
             </File>
             <File>
-              <FileName>MAIXCAM_UART1_PROTOCOL.md</FileName>
+              <FileName>CAR_POSE_XY_UART_PROTOCOL_V2.0.md</FileName>
               <FileType>5</FileType>
-              <FilePath>..\UserDriver\MAIXCAM_UART1_PROTOCOL.md</FilePath>
+              <FilePath>..\UserDriver\CAR_POSE_XY_UART_PROTOCOL_V2.0.md</FilePath>
             </File>
             <File>
               <FileName>LINUX_UART2_PROTOCOL.md</FileName>

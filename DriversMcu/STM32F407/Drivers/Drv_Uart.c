@@ -11,11 +11,11 @@
 #include "Drv_AnoOf.h"
 #include "Usart3_Pi.h"
 #include "GroundStationRx.h"
-#include "MaixCam.h"
+#include "CarPoseXyUart.h"
 
 void NoUse(u8 data){}
 //串口接收发送快速定义，直接修改此处的函数名称宏，修改成自己的串口解析和发送函数名称即可，注意函数参数格式需统一
-#define U1GetOneByte	MaixCam_GetOneByte
+#define U1GetOneByte	CarPoseXyUart_GetOneByte
 #define U2GetOneByte	GroundStationRx_GetOneByte
 #define U3GetOneByte	Pi_DataAnl
 #define U4GetOneByte	AnoOF_GetOneByte
@@ -508,6 +508,20 @@ void Uart4_IRQ(void)
 }
 
 //====uart5
+#define UART5_TX_BUFFER_SIZE 256U
+
+/*
+ * UART5 is shared by the 1 ms LingXiao protocol task and lower-rate user
+ * diagnostics running in the main loop.  A frame must be enqueued atomically;
+ * otherwise TIM7 can interrupt a main-loop enqueue and splice another frame
+ * into its middle.
+ */
+static volatile u8 Tx5Buffer[UART5_TX_BUFFER_SIZE];
+static volatile u16 Tx5WriteIndex = 0U;
+static volatile u16 Tx5ReadIndex = 0U;
+static volatile u16 Tx5PendingBytes = 0U;
+static volatile u32 Tx5DroppedFrames = 0U;
+
 void DrvUart5Init(u32 br_num)
 {
     USART_InitTypeDef USART_InitStructure;
@@ -561,20 +575,54 @@ void DrvUart5Init(u32 br_num)
     //使能USART5
     USART_Cmd(UART5, ENABLE);
 }
-u8 Tx5Buffer[256];
-u8 Tx5Counter = 0;
-u8 count5 = 0;
+
 void DrvUart5SendBuf(unsigned char *DataToSend, u8 data_num)
 {
+    u32 primask;
     u8 i;
+
+    if (DataToSend == 0 || data_num == 0U)
+    {
+        return;
+    }
+
+    /*
+     * TIM7 and the main loop can both call this function, while UART5 TXE
+     * consumes the same queue at a higher interrupt priority.  Protect the
+     * complete enqueue so bytes from two protocol frames cannot interleave.
+     */
+    primask = __get_PRIMASK();
+    __disable_irq();
+
+    if ((u16)data_num >
+        (u16)(UART5_TX_BUFFER_SIZE - Tx5PendingBytes))
+    {
+        Tx5DroppedFrames++;
+        if (primask == 0U)
+        {
+            __enable_irq();
+        }
+        return;
+    }
+
     for (i = 0; i < data_num; i++)
     {
-        Tx5Buffer[count5++] = *(DataToSend + i);
+        Tx5Buffer[Tx5WriteIndex++] = *(DataToSend + i);
+        if (Tx5WriteIndex >= UART5_TX_BUFFER_SIZE)
+        {
+            Tx5WriteIndex = 0U;
+        }
     }
+    Tx5PendingBytes += data_num;
 
     if (!(UART5->CR1 & USART_CR1_TXEIE))
     {
         USART_ITConfig(UART5, USART_IT_TXE, ENABLE); //打开发送中断
+    }
+
+    if (primask == 0U)
+    {
+        __enable_irq();
     }
 }
 u8 U5RxDataTmp[100];
@@ -614,8 +662,17 @@ void Uart5_IRQ(void)
     //发送（进入移位）中断
     if (USART_GetITStatus(UART5, USART_IT_TXE))
     {
-        UART5->DR = Tx5Buffer[Tx5Counter++]; //写DR清除中断标志
-        if (Tx5Counter == count5)
+        if (Tx5PendingBytes != 0U)
+        {
+            UART5->DR = Tx5Buffer[Tx5ReadIndex++]; //写DR清除中断标志
+            if (Tx5ReadIndex >= UART5_TX_BUFFER_SIZE)
+            {
+                Tx5ReadIndex = 0U;
+            }
+            Tx5PendingBytes--;
+        }
+
+        if (Tx5PendingBytes == 0U)
         {
             UART5->CR1 &= ~USART_CR1_TXEIE; //关闭TXE（发送中断）中断
         }

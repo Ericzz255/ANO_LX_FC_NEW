@@ -22,43 +22,23 @@
 
 _fc_ext_sensor_st ext_sens;
 
-#define SLAM_VELOCITY_WINDOW_MS          200U
+#define SLAM_VELOCITY_WINDOW_MS          100U
 #define SLAM_VELOCITY_RESET_TIMEOUT_MS   300U
-#define SLAM_VELOCITY_FILTER_ALPHA       0.60f
+#define SLAM_VELOCITY_FILTER_ALPHA       0.25f
 #define SLAM_VELOCITY_DEADBAND_CMPS      3.0f
 #define SLAM_VELOCITY_REJECT_CMPS        150.0f
 
 typedef struct
 {
 	u8 initialized;
-	u8 sample_count;
-	s16 older_x_cm;
-	s16 older_y_cm;
-	u32 older_ms;
-	s16 newer_x_cm;
-	s16 newer_y_cm;
-	u32 newer_ms;
+	s16 anchor_x_cm;
+	s16 anchor_y_cm;
+	u32 anchor_ms;
 	float filtered_x_cmps;
 	float filtered_y_cmps;
 } _slam_velocity_estimator_st;
 
 static _slam_velocity_estimator_st slam_velocity;
-
-static void SlamVelocity_ResetEstimator(s16 x_cm,
-										s16 y_cm,
-										u32 now_ms)
-{
-	slam_velocity.initialized = 1U;
-	slam_velocity.sample_count = 1U;
-	slam_velocity.older_x_cm = x_cm;
-	slam_velocity.older_y_cm = y_cm;
-	slam_velocity.older_ms = now_ms;
-	slam_velocity.newer_x_cm = x_cm;
-	slam_velocity.newer_y_cm = y_cm;
-	slam_velocity.newer_ms = now_ms;
-	slam_velocity.filtered_x_cmps = 0.0f;
-	slam_velocity.filtered_y_cmps = 0.0f;
-}
 
 static float SlamVelocity_Abs(float value)
 {
@@ -109,7 +89,6 @@ void LX_FC_EXT_Sensor_SetSlamPosition(s16 x_cm, s16 y_cm)
 {
 	u32 now_ms = GetSysRunTimeMs();
 	u32 elapsed_ms;
-	u32 latest_sample_ms;
 
 	ext_sens.gen_pos.st_data.ulhca_pos_cm[0] = (s32)x_cm;
 	ext_sens.gen_pos.st_data.ulhca_pos_cm[1] = (s32)y_cm;
@@ -118,80 +97,59 @@ void LX_FC_EXT_Sensor_SetSlamPosition(s16 x_cm, s16 y_cm)
 
 	if (slam_velocity.initialized == 0U)
 	{
-		SlamVelocity_ResetEstimator(x_cm, y_cm, now_ms);
+		slam_velocity.initialized = 1U;
+		slam_velocity.anchor_x_cm = x_cm;
+		slam_velocity.anchor_y_cm = y_cm;
+		slam_velocity.anchor_ms = now_ms;
+		slam_velocity.filtered_x_cmps = 0.0f;
+		slam_velocity.filtered_y_cmps = 0.0f;
 		SlamVelocity_Publish();
 		return;
 	}
 
-	latest_sample_ms = (slam_velocity.sample_count >= 2U) ?
-		slam_velocity.newer_ms : slam_velocity.older_ms;
+	elapsed_ms = (u32)(now_ms - slam_velocity.anchor_ms);
 
-	if ((u32)(now_ms - latest_sample_ms) >
-		SLAM_VELOCITY_RESET_TIMEOUT_MS)
+	if (elapsed_ms > SLAM_VELOCITY_RESET_TIMEOUT_MS)
 	{
 		/*
 		 * A long gap invalidates the previous differentiation baseline.
 		 * Reinitialize at zero speed; subsequent fresh samples rebuild it.
 		 */
-		SlamVelocity_ResetEstimator(x_cm, y_cm, now_ms);
+		slam_velocity.anchor_x_cm = x_cm;
+		slam_velocity.anchor_y_cm = y_cm;
+		slam_velocity.anchor_ms = now_ms;
+		slam_velocity.filtered_x_cmps = 0.0f;
+		slam_velocity.filtered_y_cmps = 0.0f;
 	}
-	else if (slam_velocity.sample_count < 2U)
+	else if (elapsed_ms >= SLAM_VELOCITY_WINDOW_MS)
 	{
-		slam_velocity.newer_x_cm = x_cm;
-		slam_velocity.newer_y_cm = y_cm;
-		slam_velocity.newer_ms = now_ms;
-		slam_velocity.sample_count = 2U;
-	}
-	else
-	{
-		elapsed_ms = (u32)(now_ms - slam_velocity.older_ms);
+		float raw_x_cmps =
+			(float)((s32)x_cm - (s32)slam_velocity.anchor_x_cm) *
+			1000.0f / (float)elapsed_ms;
+		float raw_y_cmps =
+			(float)((s32)y_cm - (s32)slam_velocity.anchor_y_cm) *
+			1000.0f / (float)elapsed_ms;
 
-		if (elapsed_ms >= SLAM_VELOCITY_WINDOW_MS)
+		/*
+		 * A speed outside the mission envelope is treated as a SLAM
+		 * coordinate jump. Re-anchor without feeding the jump to the IMU.
+		 */
+		if (SlamVelocity_Abs(raw_x_cmps) <=
+				SLAM_VELOCITY_REJECT_CMPS &&
+			SlamVelocity_Abs(raw_y_cmps) <=
+				SLAM_VELOCITY_REJECT_CMPS)
 		{
-			float raw_x_cmps =
-				(float)((s32)x_cm -
-						(s32)slam_velocity.older_x_cm) *
-				1000.0f / (float)elapsed_ms;
-			float raw_y_cmps =
-				(float)((s32)y_cm -
-						(s32)slam_velocity.older_y_cm) *
-				1000.0f / (float)elapsed_ms;
-
-			/*
-			 * A speed outside the mission envelope is treated as a SLAM
-			 * coordinate jump. Re-anchor without feeding the jump to the IMU.
-			 */
-			if (SlamVelocity_Abs(raw_x_cmps) <=
-					SLAM_VELOCITY_REJECT_CMPS &&
-				SlamVelocity_Abs(raw_y_cmps) <=
-					SLAM_VELOCITY_REJECT_CMPS)
-			{
-				slam_velocity.filtered_x_cmps +=
-					SLAM_VELOCITY_FILTER_ALPHA *
-					(raw_x_cmps -
-					 slam_velocity.filtered_x_cmps);
-				slam_velocity.filtered_y_cmps +=
-					SLAM_VELOCITY_FILTER_ALPHA *
-					(raw_y_cmps -
-					 slam_velocity.filtered_y_cmps);
-			}
-
-			/*
-			 * Roll the 200 ms window forward by one 10 Hz sample. This
-			 * keeps velocity updates at 10 Hz instead of reducing them
-			 * to 5 Hz.
-			 */
-			slam_velocity.older_x_cm =
-				slam_velocity.newer_x_cm;
-			slam_velocity.older_y_cm =
-				slam_velocity.newer_y_cm;
-			slam_velocity.older_ms =
-				slam_velocity.newer_ms;
+			slam_velocity.filtered_x_cmps +=
+				SLAM_VELOCITY_FILTER_ALPHA *
+				(raw_x_cmps - slam_velocity.filtered_x_cmps);
+			slam_velocity.filtered_y_cmps +=
+				SLAM_VELOCITY_FILTER_ALPHA *
+				(raw_y_cmps - slam_velocity.filtered_y_cmps);
 		}
 
-		slam_velocity.newer_x_cm = x_cm;
-		slam_velocity.newer_y_cm = y_cm;
-		slam_velocity.newer_ms = now_ms;
+		slam_velocity.anchor_x_cm = x_cm;
+		slam_velocity.anchor_y_cm = y_cm;
+		slam_velocity.anchor_ms = now_ms;
 	}
 
 	SlamVelocity_Publish();

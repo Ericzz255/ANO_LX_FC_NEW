@@ -14,7 +14,7 @@
 #include "ANO_DT_LX.h"
 #include "Drv_Uart.h"
 #include "Drv_Timer.h"
-#include "MaixCam.h"
+#include "CarPoseXyUart.h"
 
 u8 All_Init()
 {
@@ -26,8 +26,8 @@ u8 All_Init()
 	//初始化电调输出功能
 	DrvPwmOutInit();
 	MyDelayMs(100);
-	//串口1接MaixCAM，只传输小车视觉跟踪数据，不传图像
-	MaixCam_Init();
+	//串口1接收小车N10P/Cartographer场地坐标
+	CarPoseXyUart_Init();
 	DrvUart1Init(115200);
 	//串口2初始化，接入地面站
 	DrvUart2Init(115200);

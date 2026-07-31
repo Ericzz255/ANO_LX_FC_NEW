@@ -2,8 +2,7 @@
 #include "ANO_LX.h"
 #include "Drv_Uart.h"
 #include "HorizontalControl.h"
-#include "MaixCam.h"
-#include "User_Task.h"
+#include "CarPoseXyUart.h"
 
 #define USER_DATA_DEST_ADDR   HW_ALL
 #define USER_DATA_BUFFER_SIZE 32U
@@ -16,20 +15,42 @@ static void UserData_PutS16(u8 *buffer, u8 *cnt, s16 value)
     buffer[(*cnt)++] = BYTE1(value);
 }
 
+static s16 UserData_ClampS32ToS16(s32 value)
+{
+    if (value > 32767L)
+    {
+        return 32767;
+    }
+    if (value < -32768L)
+    {
+        return (s16)-32768;
+    }
+    return (s16)value;
+}
+
 static void UserDataTransfer_FillPayloadF1(u8 *buffer, u8 *cnt)
 {
+    car_pose_xy_t car_pose;
+    u8 car_pose_valid = CarPoseXyUart_GetPose(&car_pose);
+
     /* USERDATA1..2: current position, centimetres. */
     UserData_PutS16(buffer, cnt, now_x);
     UserData_PutS16(buffer, cnt, now_y);
-    /* USERDATA3: 1 while mission step 10 owns horizontal control. */
-    UserData_PutS16(buffer, cnt,
-                    (UserTask_GetMissionStep() == 10U) ? 1 : 0);
+    /* USERDATA3: 1 while a fresh car pose is eligible for control. */
+    UserData_PutS16(buffer, cnt, car_pose_valid ? 1 : 0);
     /* USERDATA4: 1 after SLAM position initialization while data is fresh. */
     UserData_PutS16(buffer, cnt,
                     HorizontalControl_HasValidPosition() ? 1 : 0);
-    /* USERDATA5: 1 when valid MaixCAM frames remain fresh. */
+    /* USERDATA5: 1 while structure- and CRC-valid UART1 frames arrive. */
     UserData_PutS16(buffer, cnt,
-                    MaixCam_IsLinkAlive() ? 1 : 0);
+                    CarPoseXyUart_IsLinkAlive() ? 1 : 0);
+    /* USERDATA6..7: current valid vehicle position, millimetres. */
+    UserData_PutS16(buffer, cnt,
+                    car_pose_valid ?
+                    UserData_ClampS32ToS16(car_pose.x_mm) : 0);
+    UserData_PutS16(buffer, cnt,
+                    car_pose_valid ?
+                    UserData_ClampS32ToS16(car_pose.y_mm) : 0);
 }
 
 static void UserDataTransfer_SendFrame(u8 frame_id,

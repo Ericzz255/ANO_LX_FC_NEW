@@ -14,8 +14,8 @@
 #define HORIZONTAL_HOLD_KP_Y                   0.40f   /* Y轴位置环P增益 */
 #define HORIZONTAL_HOLD_KD_Y                   0.05f   /* Y轴位置环D增益 */
 #define HORIZONTAL_HOLD_DEADBAND_CM            5       /* 定点保持误差小于5cm时进入死区 */
-#define HORIZONTAL_HOLD_MIN_VEL_CMPS           3       /* 死区外最小有效速度(cm/s) */
-#define HORIZONTAL_HOLD_MAX_VEL_CMPS           12      /* 位置环输出最大速度(cm/s) */
+#define HORIZONTAL_HOLD_MIN_VEL_CMPS           8       /* 死区外最小有效速度(cm/s) */
+#define HORIZONTAL_HOLD_MAX_VEL_CMPS           20      /* 位置环输出最大速度(cm/s) */
 #define HORIZONTAL_HOLD_MAX_VEL_STEP_CMPS      4       /* 单周期速度增量限幅(cm/s) */
 #define HORIZONTAL_HOLD_SENSOR_TIMEOUT_MS      300U    /* 传感器超时时间(ms) */
 #define SLAM_READY_CONFIRM_MS                  3000U   /* 连续稳定后才允许使用SLAM */
