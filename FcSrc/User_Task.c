@@ -11,6 +11,8 @@
 #define TAKEOFF_STABILIZE_MS            3000U
 #define USER_TASK_PERIOD_MS             20U
 #define HEIGHT_TOLERANCE_CM             5.0f
+#define RETURN_POSITION_TOLERANCE_CM     5
+#define RETURN_POSITION_STABLE_MS        1000U
 #define CAR_START_FORWARD_OFFSET_MM      500L
 #define CAR_START_RIGHT_OFFSET_MM        375L
 
@@ -23,8 +25,8 @@
  * 4 take off to the contest cruise height
  * 5 hold at 80 cm for three continuous seconds
  * 6 continuously follow the latest valid vehicle X/Y coordinates
- * 8 reserved for a future payload-release trigger
- * 9 land
+ * 8 release the payload and return to absolute SLAM coordinate (0, 0)
+ * 9 land after holding the return point for one continuous second
  *
  * CH6 is only a bench trigger; the contest start command will later come
  * from the vehicle over the wireless link.
@@ -32,6 +34,8 @@
 static u8 mission_step = 0;
 static u8 car_target_active = 0U;
 static u8 car_origin_captured = 0U;
+static u8 return_target_set = 0U;
+static u16 return_stable_ms = 0U;
 static u32 last_car_update_count = 0U;
 static s16 mission_origin_x_cm = 0;
 static s16 mission_origin_y_cm = 0;
@@ -162,6 +166,8 @@ static void UserTask_ResetMission(void)
     mission_step = 0;
     car_target_active = 0U;
     car_origin_captured = 0U;
+    return_target_set = 0U;
+    return_stable_ms = 0U;
     last_car_update_count = 0U;
     mission_origin_x_cm = 0;
     mission_origin_y_cm = 0;
@@ -175,6 +181,8 @@ static void UserTask_EnterLanding(void)
 {
     mission_step = 9;
     car_target_active = 0U;
+    return_target_set = 0U;
+    return_stable_ms = 0U;
     HorizontalControl_StopOutput();
     HeightControl_Reset();
 }
@@ -311,7 +319,43 @@ void UserTask_OneKeyCmd(void)
 
     case 8:
         DrvDropMagnetSet(0U);
-        UserTask_EnterLanding();
+
+        HeightControl_Update((float)MISSION_HEIGHT_CM);
+
+        if (return_target_set == 0U)
+        {
+            if (HorizontalControl_SetTarget(0, 0) == 0U)
+            {
+                UserTask_EnterLanding();
+                break;
+            }
+
+            return_target_set = 1U;
+            return_stable_ms = 0U;
+        }
+
+        HorizontalControl_Update();
+        if (HorizontalControl_GetFaultCode() != 0)
+        {
+            UserTask_EnterLanding();
+        }
+        else if (HorizontalControl_TargetReached(
+                     RETURN_POSITION_TOLERANCE_CM))
+        {
+            if (return_stable_ms < RETURN_POSITION_STABLE_MS)
+            {
+                return_stable_ms += USER_TASK_PERIOD_MS;
+            }
+
+            if (return_stable_ms >= RETURN_POSITION_STABLE_MS)
+            {
+                UserTask_EnterLanding();
+            }
+        }
+        else
+        {
+            return_stable_ms = 0U;
+        }
         break;
 
     case 9:
