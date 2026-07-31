@@ -5,6 +5,7 @@
 #include "Highcontroll.h"
 #include "HorizontalControl.h"
 #include "CarPoseXyUart.h"
+#include "Drv_AnoOf.h"
 #include "Drv_PwmOut.h"
 
 #define MISSION_HEIGHT_CM               80U
@@ -13,11 +14,16 @@
 #define HEIGHT_TOLERANCE_CM             5.0f
 #define RETURN_POSITION_TOLERANCE_CM     5
 #define RETURN_POSITION_STABLE_MS        1000U
-#define CAR_START_FORWARD_OFFSET_MM      500L
+#define CAR_START_FORWARD_OFFSET_MM      250L
 #define CAR_START_RIGHT_OFFSET_MM        375L
 #define CAR_LAP_DEPARTURE_RADIUS_MM       1000UL
 #define CAR_LAP_RETURN_RADIUS_MM          300UL
 #define LAP_FINISH_POSITION_TOLERANCE_CM  10
+#define MANUAL_HOLD_MIN_HEIGHT_CM         5U
+#define MANUAL_HOLD_MAX_HEIGHT_CM         500U
+#define CAR_STATIONARY_ARM_DISTANCE_MM    100UL
+#define CAR_STATIONARY_TOLERANCE_MM       10L
+#define CAR_STATIONARY_TIMEOUT_MS         3000UL
 
 /*
  * Bench-test mission skeleton for the D problem:
@@ -42,6 +48,15 @@ static u8 return_target_set = 0U;
 static u16 return_stable_ms = 0U;
 static u8 car_lap_departed = 0U;
 static u8 car_lap_complete = 0U;
+static u8 car_motion_seen = 0U;
+static u8 car_stationary_initialized = 0U;
+static u8 car_stationary_return = 0U;
+static u32 car_stationary_start_ms = 0U;
+static s32 car_stationary_x_mm = 0L;
+static s32 car_stationary_y_mm = 0L;
+static u8 manual_hold_requested = 0U;
+static u8 manual_hold_active = 0U;
+static float manual_hold_height_cm = 0.0f;
 static u32 last_car_update_count = 0U;
 static s16 mission_origin_x_cm = 0;
 static s16 mission_origin_y_cm = 0;
@@ -133,6 +148,63 @@ static void UserTask_UpdateCarLap(const car_pose_xy_t *pose)
     }
 }
 
+static void UserTask_ResetCarStationaryWindow(void)
+{
+    car_stationary_initialized = 0U;
+    car_stationary_start_ms = 0U;
+}
+
+static void UserTask_UpdateCarStationary(const car_pose_xy_t *pose)
+{
+    u32 origin_distance_mm;
+    s32 delta_x_mm;
+    s32 delta_y_mm;
+
+    origin_distance_mm = UserTask_ApproxDistanceMm(
+        pose->x_mm - car_origin_x_mm,
+        pose->y_mm - car_origin_y_mm);
+
+    if (origin_distance_mm >= CAR_STATIONARY_ARM_DISTANCE_MM)
+    {
+        car_motion_seen = 1U;
+    }
+
+    if (car_motion_seen == 0U)
+    {
+        UserTask_ResetCarStationaryWindow();
+        return;
+    }
+
+    if (car_stationary_initialized == 0U)
+    {
+        car_stationary_x_mm = pose->x_mm;
+        car_stationary_y_mm = pose->y_mm;
+        car_stationary_start_ms = pose->receive_ms;
+        car_stationary_initialized = 1U;
+        return;
+    }
+
+    delta_x_mm = pose->x_mm - car_stationary_x_mm;
+    delta_y_mm = pose->y_mm - car_stationary_y_mm;
+
+    if (delta_x_mm > CAR_STATIONARY_TOLERANCE_MM ||
+        delta_x_mm < -CAR_STATIONARY_TOLERANCE_MM ||
+        delta_y_mm > CAR_STATIONARY_TOLERANCE_MM ||
+        delta_y_mm < -CAR_STATIONARY_TOLERANCE_MM)
+    {
+        car_stationary_x_mm = pose->x_mm;
+        car_stationary_y_mm = pose->y_mm;
+        car_stationary_start_ms = pose->receive_ms;
+        return;
+    }
+
+    if ((u32)(pose->receive_ms - car_stationary_start_ms) >=
+        CAR_STATIONARY_TIMEOUT_MS)
+    {
+        car_stationary_return = 1U;
+    }
+}
+
 static u8 UserTask_CaptureCarOrigin(void)
 {
     car_pose_xy_t pose;
@@ -170,6 +242,11 @@ static u8 UserTask_UpdateCarTarget(void)
     if (car_origin_captured == 0U ||
         CarPoseXyUart_GetPose(&pose) == RESET)
     {
+        if (mission_step == 6U)
+        {
+            UserTask_ResetCarStationaryWindow();
+        }
+
         if (car_target_active != 0U)
         {
             HorizontalControl_CaptureTarget();
@@ -185,9 +262,9 @@ static u8 UserTask_UpdateCarTarget(void)
     }
 
     /*
-     * At mission start the vehicle is 50 cm forward and 37.5 cm right
+     * At mission start the vehicle is 25 cm forward and 37.5 cm right
      * of the aircraft. In the shared X-forward/Y-left convention:
-     * vehicle_start = aircraft_start + (+500 mm, -375 mm).
+     * vehicle_start = aircraft_start + (+250 mm, -375 mm).
      */
     relative_x_mm =
         pose.x_mm - car_origin_x_mm +
@@ -210,6 +287,10 @@ static u8 UserTask_UpdateCarTarget(void)
     }
 
     UserTask_UpdateCarLap(&pose);
+    if (mission_step == 6U)
+    {
+        UserTask_UpdateCarStationary(&pose);
+    }
     last_car_update_count = pose.update_count;
     car_target_active = 1U;
     return SET;
@@ -224,6 +305,15 @@ static void UserTask_ResetMission(void)
     return_stable_ms = 0U;
     car_lap_departed = 0U;
     car_lap_complete = 0U;
+    car_motion_seen = 0U;
+    car_stationary_initialized = 0U;
+    car_stationary_return = 0U;
+    car_stationary_start_ms = 0U;
+    car_stationary_x_mm = 0L;
+    car_stationary_y_mm = 0L;
+    manual_hold_requested = 0U;
+    manual_hold_active = 0U;
+    manual_hold_height_cm = 0.0f;
     last_car_update_count = 0U;
     mission_origin_x_cm = 0;
     mission_origin_y_cm = 0;
@@ -239,8 +329,65 @@ static void UserTask_EnterLanding(void)
     car_target_active = 0U;
     return_target_set = 0U;
     return_stable_ms = 0U;
+    manual_hold_requested = 0U;
+    manual_hold_active = 0U;
+    manual_hold_height_cm = 0.0f;
     HorizontalControl_StopOutput();
     HeightControl_Reset();
+}
+
+static void UserTask_ManualHold(void)
+{
+    if (manual_hold_requested == 0U)
+    {
+        UserTask_ResetMission();
+        manual_hold_requested = 1U;
+    }
+
+    mission_step = 10U;
+
+    if (fc_sta.fc_mode_sta != 2U)
+    {
+        HorizontalControl_StopOutput();
+        HeightControl_Reset();
+        LX_Change_Mode(2U);
+        return;
+    }
+
+    if (manual_hold_active == 0U)
+    {
+        if (HorizontalControl_HasValidPosition() == 0U ||
+            AnoOF_AltitudeIsValid() == 0U ||
+            ano_of.of_alt_cm < MANUAL_HOLD_MIN_HEIGHT_CM ||
+            ano_of.of_alt_cm > MANUAL_HOLD_MAX_HEIGHT_CM)
+        {
+            HorizontalControl_StopOutput();
+            HeightControl_Reset();
+            return;
+        }
+
+        HorizontalControl_Reset();
+        HorizontalControl_CaptureTarget();
+        HeightControl_Reset();
+        manual_hold_height_cm = (float)ano_of.of_alt_cm;
+        manual_hold_active = 1U;
+    }
+
+    HeightControl_Update(manual_hold_height_cm);
+
+    if (HorizontalControl_GetFaultCode() != 0U)
+    {
+        if (HorizontalControl_HasValidPosition() == 0U)
+        {
+            HorizontalControl_StopOutput();
+            return;
+        }
+
+        HorizontalControl_Reset();
+        HorizontalControl_CaptureTarget();
+    }
+
+    HorizontalControl_Update();
 }
 
 u8 UserTask_GetMissionStep(void)
@@ -265,14 +412,22 @@ void UserTask_OneKeyCmd(void)
     /* CH6 low: manual landing for bench safety. */
     if (ch6 > 800 && ch6 < 1200)
     {
-        HorizontalControl_StopOutput();
-        HeightControl_Reset();
+        UserTask_ResetMission();
         if (land_command_sent == 0)
         {
             land_command_sent = OneKey_Land();
         }
         mission_step = 0;
         state_timer_ms = 0;
+        return;
+    }
+
+    /* CH6 middle: capture and hold the current position and altitude. */
+    if (ch6 >= 1200 && ch6 <= 1800)
+    {
+        land_command_sent = 0;
+        state_timer_ms = 0;
+        UserTask_ManualHold();
         return;
     }
 
@@ -283,6 +438,13 @@ void UserTask_OneKeyCmd(void)
         land_command_sent = 0;
         state_timer_ms = 0;
         return;
+    }
+
+    if (manual_hold_requested != 0U)
+    {
+        UserTask_ResetMission();
+        land_command_sent = 0;
+        state_timer_ms = 0;
     }
 
     if (mission_step == 0)
@@ -371,7 +533,8 @@ void UserTask_OneKeyCmd(void)
         {
             UserTask_EnterLanding();
         }
-        else if (car_lap_complete != 0U)
+        else if (car_lap_complete != 0U ||
+                 car_stationary_return != 0U)
         {
             car_target_active = 0U;
             mission_step = 7;
