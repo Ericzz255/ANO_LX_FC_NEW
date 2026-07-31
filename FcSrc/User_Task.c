@@ -15,6 +15,9 @@
 #define RETURN_POSITION_STABLE_MS        1000U
 #define CAR_START_FORWARD_OFFSET_MM      500L
 #define CAR_START_RIGHT_OFFSET_MM        375L
+#define CAR_LAP_DEPARTURE_RADIUS_MM       1000UL
+#define CAR_LAP_RETURN_RADIUS_MM          300UL
+#define LAP_FINISH_POSITION_TOLERANCE_CM  10
 
 /*
  * Bench-test mission skeleton for the D problem:
@@ -24,7 +27,8 @@
  * 3 wait after unlock
  * 4 take off to the contest cruise height
  * 5 hold at 80 cm for three continuous seconds
- * 6 continuously follow the latest valid vehicle X/Y coordinates
+ * 6 follow the vehicle until it completes one full lap
+ * 7 finish the frozen final follow target
  * 8 release the payload and return to absolute SLAM coordinate (0, 0)
  * 9 land after holding the return point for one continuous second
  *
@@ -36,6 +40,8 @@ static u8 car_target_active = 0U;
 static u8 car_origin_captured = 0U;
 static u8 return_target_set = 0U;
 static u16 return_stable_ms = 0U;
+static u8 car_lap_departed = 0U;
+static u8 car_lap_complete = 0U;
 static u32 last_car_update_count = 0U;
 static s16 mission_origin_x_cm = 0;
 static s16 mission_origin_y_cm = 0;
@@ -78,6 +84,53 @@ static s16 UserTask_ClampToS16(s32 value)
         return (s16)-32768;
     }
     return (s16)value;
+}
+
+static u32 UserTask_AbsS32ToU32(s32 value)
+{
+    return (value >= 0) ? (u32)value : (u32)(-value);
+}
+
+/* Max + 3/8 min is a low-cost approximation of sqrt(x*x + y*y). */
+static u32 UserTask_ApproxDistanceMm(s32 delta_x_mm, s32 delta_y_mm)
+{
+    u32 abs_x_mm = UserTask_AbsS32ToU32(delta_x_mm);
+    u32 abs_y_mm = UserTask_AbsS32ToU32(delta_y_mm);
+    u32 maximum_mm;
+    u32 minimum_mm;
+
+    if (abs_x_mm >= abs_y_mm)
+    {
+        maximum_mm = abs_x_mm;
+        minimum_mm = abs_y_mm;
+    }
+    else
+    {
+        maximum_mm = abs_y_mm;
+        minimum_mm = abs_x_mm;
+    }
+
+    return maximum_mm + (minimum_mm * 3U) / 8U;
+}
+
+static void UserTask_UpdateCarLap(const car_pose_xy_t *pose)
+{
+    u32 origin_distance_mm;
+
+    origin_distance_mm = UserTask_ApproxDistanceMm(
+        pose->x_mm - car_origin_x_mm,
+        pose->y_mm - car_origin_y_mm);
+
+    if (origin_distance_mm >= CAR_LAP_DEPARTURE_RADIUS_MM)
+    {
+        car_lap_departed = 1U;
+    }
+
+    if (car_lap_departed != 0U &&
+        origin_distance_mm <= CAR_LAP_RETURN_RADIUS_MM)
+    {
+        car_lap_complete = 1U;
+    }
 }
 
 static u8 UserTask_CaptureCarOrigin(void)
@@ -156,6 +209,7 @@ static u8 UserTask_UpdateCarTarget(void)
         return RESET;
     }
 
+    UserTask_UpdateCarLap(&pose);
     last_car_update_count = pose.update_count;
     car_target_active = 1U;
     return SET;
@@ -168,6 +222,8 @@ static void UserTask_ResetMission(void)
     car_origin_captured = 0U;
     return_target_set = 0U;
     return_stable_ms = 0U;
+    car_lap_departed = 0U;
+    car_lap_complete = 0U;
     last_car_update_count = 0U;
     mission_origin_x_cm = 0;
     mission_origin_y_cm = 0;
@@ -314,6 +370,27 @@ void UserTask_OneKeyCmd(void)
         if (HorizontalControl_GetFaultCode() != 0)
         {
             UserTask_EnterLanding();
+        }
+        else if (car_lap_complete != 0U)
+        {
+            car_target_active = 0U;
+            mission_step = 7;
+        }
+        break;
+
+    case 7:
+        HeightControl_Update((float)MISSION_HEIGHT_CM);
+        HorizontalControl_Update();
+        if (HorizontalControl_GetFaultCode() != 0)
+        {
+            UserTask_EnterLanding();
+        }
+        else if (HorizontalControl_TargetReached(
+                     LAP_FINISH_POSITION_TOLERANCE_CM))
+        {
+            return_target_set = 0U;
+            return_stable_ms = 0U;
+            mission_step = 8;
         }
         break;
 

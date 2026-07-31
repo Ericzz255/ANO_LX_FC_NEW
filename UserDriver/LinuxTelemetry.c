@@ -11,8 +11,8 @@
 #define LINUX_TELEMETRY_HEADER_1          0xAAU
 #define LINUX_TELEMETRY_HEADER_2          0x55U
 #define LINUX_TELEMETRY_TYPE_FLIGHT_STATE 0x01U
-#define LINUX_TELEMETRY_PAYLOAD_LENGTH    20U
-#define LINUX_TELEMETRY_FRAME_LENGTH      26U
+#define LINUX_TELEMETRY_PAYLOAD_LENGTH    16U
+#define LINUX_TELEMETRY_FRAME_LENGTH      22U
 
 #define LINUX_STATUS_POSITION_VALID       (1U << 0)
 #define LINUX_STATUS_HEIGHT_VALID         (1U << 1)
@@ -146,8 +146,6 @@ void LinuxTelemetry_Send(void)
     LinuxTelemetry_PutS16(frame, &index, now_x);
     LinuxTelemetry_PutS16(frame, &index, now_y);
     LinuxTelemetry_PutU16(frame, &index, height_cm);
-    LinuxTelemetry_PutS16(frame, &index, fc_vel.st_data.vel_x);
-    LinuxTelemetry_PutS16(frame, &index, fc_vel.st_data.vel_y);
     LinuxTelemetry_PutU16(frame, &index, fc_bat.st_data.voltage_100);
     LinuxTelemetry_PutS16(frame, &index, car_x_cm);
     LinuxTelemetry_PutS16(frame, &index, car_y_cm);
