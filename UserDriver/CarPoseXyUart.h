@@ -3,9 +3,10 @@
 
 #include "SysConfig.h"
 
-/* 小车单片机 -> 无线透传 -> 飞控USART1，固定14字节X/Y毫米坐标帧。 */
+/* 小车单片机 -> 无线透传 -> 飞控USART1，X/Y及起飞标志帧。 */
 
-#define CAR_POSE_XY_FRAME_SIZE       14U
+#define CAR_POSE_XY_LEGACY_FRAME_SIZE 14U
+#define CAR_POSE_XY_FRAME_SIZE        15U
 #define CAR_POSE_XY_VALID_TIMEOUT_MS 150U
 #define CAR_POSE_XY_LINK_TIMEOUT_MS  300U
 #define CAR_POSE_XY_INVALID_VALUE    ((s32)0x80000000UL)
@@ -27,6 +28,7 @@ typedef struct
     u32 invalid_frames;
     u32 interbyte_timeouts;
     u32 last_frame_ms;
+    u8 takeoff_flag;
     u8 self_test_pass;
 } car_pose_xy_uart_stats_t;
 
@@ -37,6 +39,7 @@ u8 CarPoseXyUart_GetPose(car_pose_xy_t *pose);
 u8 CarPoseXyUart_IsControlValid(void);
 u8 CarPoseXyUart_IsLinkAlive(void);
 u8 CarPoseXyUart_HasReceivedData(void);
+u8 CarPoseXyUart_GetTakeoffFlag(void);
 void CarPoseXyUart_GetStats(car_pose_xy_uart_stats_t *stats);
 u8 CarPoseXyUart_ProtocolSelfTest(void);
 

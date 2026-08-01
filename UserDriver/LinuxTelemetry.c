@@ -20,6 +20,7 @@
 #define LINUX_STATUS_RC_FAILSAFE           (1U << 3)
 #define LINUX_STATUS_CAR_POSITION_VALID    (1U << 4)
 #define LINUX_STATUS_CAR_LINK_ALIVE        (1U << 5)
+#define LINUX_STATUS_TAKEOFF_FLAG          (1U << 6)
 
 static void LinuxTelemetry_PutU16(u8 *buffer, u8 *index, u16 value)
 {
@@ -117,6 +118,11 @@ void LinuxTelemetry_Send(void)
     if (CarPoseXyUart_IsLinkAlive() != 0U)
     {
         status |= LINUX_STATUS_CAR_LINK_ALIVE;
+    }
+
+    if (CarPoseXyUart_GetTakeoffFlag() != 0U)
+    {
+        status |= LINUX_STATUS_TAKEOFF_FLAG;
     }
 
     if (CarPoseXyUart_GetPose(&car_pose) != 0U)

@@ -6,6 +6,7 @@
 #include "HorizontalControl.h"
 #include "Drv_AnoOf.h"
 #include "Drv_PwmOut.h"
+#include "CarPoseXyUart.h"
 
 #define MISSION_HEIGHT_CM               75U
 #define TAKEOFF_STABILIZE_MS            3000U
@@ -15,7 +16,7 @@
 #define RETURN_POSITION_STABLE_MS        3000U
 #define MANUAL_HOLD_MIN_HEIGHT_CM         5U
 #define MANUAL_HOLD_MAX_HEIGHT_CM         500U
-#define BLIND_WAYPOINT_TOLERANCE_CM       10
+#define BLIND_WAYPOINT_TOLERANCE_CM       13
 #define BLIND_WAYPOINT_TIMEOUT_MS          20000UL
 #define BLIND_LAP_TIMEOUT_MS              120000UL
 #define BLIND_RETURN_TIMEOUT_MS            30000UL
@@ -23,8 +24,8 @@
 /*
  * Relative geofence around the mapped route. Coordinates use the aircraft
  * SLAM convention: X points from A to B and positive Y points left. The
- * nominal route spans X=12.5..312.5 cm and Y=-187.5..0 cm relative to
- * takeoff.
+ * outbound route and return span X=0..312.5 cm and Y=-187.5..0 cm relative
+ * to takeoff.
  */
 #define BLIND_GEOFENCE_MIN_X_CM           (-20L)
 #define BLIND_GEOFENCE_MAX_X_CM            345L
@@ -38,13 +39,12 @@ typedef struct
 } blind_waypoint_t;
 
 /*
- * Fixed 30-degree samples of the 75 cm-radius stadium route in the map.
- * Point A is 87.5 cm forward and 37.5 cm right of the aircraft takeoff
- * point. Half-centimetre map coordinates are rounded to integer centimetres.
+ * The first target is B; A is deliberately skipped. The remaining points
+ * sample the upper 75 cm-radius turn through C and continue to D.
+ * Half-centimetre map coordinates are rounded to integer centimetres.
  */
 static const blind_waypoint_t blind_waypoints[] =
 {
-    {  88,  -38}, /* A */
     { 238,  -38}, /* B */
     { 275,  -48},
     { 302,  -75},
@@ -52,13 +52,7 @@ static const blind_waypoint_t blind_waypoints[] =
     { 302, -150},
     { 275, -177},
     { 238, -188}, /* C */
-    {  88, -188}, /* D */
-    {  50, -177},
-    {  23, -150},
-    {  13, -113},
-    {  23,  -75},
-    {  50,  -48},
-    {  88,  -38}  /* A, one lap complete */
+    {  88, -188}  /* D, start return */
 };
 
 #define BLIND_WAYPOINT_COUNT \
@@ -72,12 +66,12 @@ static const blind_waypoint_t blind_waypoints[] =
  * 3 wait after unlock
  * 4 take off to the contest cruise height
  * 5 hold at 75 cm for three continuous seconds
- * 6 fly the fixed mapped waypoint loop using aircraft SLAM feedback
+ * 6 fly directly to B, follow the upper turn through C, and finish at D
  * 7 release the payload, return to absolute (0, 0), and hold three seconds
  * 8 land
  *
- * CH6 is the current bench trigger; a separate external start command can
- * replace it later without reintroducing vehicle position dependence.
+ * CH6 remains the safety enable. A fresh vehicle TAKEOFF_FLAG=1 starts the
+ * mission once; vehicle position never participates in flight control.
  */
 static u8 mission_step = 0;
 static u8 return_target_set = 0U;
@@ -245,10 +239,19 @@ void UserTask_OneKeyCmd(void)
 {
     static u8 land_command_sent = 0;
     static u16 state_timer_ms = 0;
+    static u8 car_takeoff_start_armed = 1U;
     u16 ch6 = rc_in.rc_ch.st_data.ch_[ch_6_aux2];
+    u8 car_takeoff_flag = CarPoseXyUart_GetTakeoffFlag();
+
+    /* A new start requires the vehicle flag to return to zero first. */
+    if (car_takeoff_flag == RESET)
+    {
+        car_takeoff_start_armed = 1U;
+    }
 
     if (rc_in.fail_safe != 0)
     {
+        car_takeoff_start_armed = 0U;
         UserTask_ResetMission();
         land_command_sent = 0;
         state_timer_ms = 0;
@@ -273,7 +276,7 @@ void UserTask_OneKeyCmd(void)
         return;
     }
 
-    /* CH6 high runs the temporary bench-test mission. */
+    /* CH6 high enables, but does not itself start, the automatic mission. */
     if (ch6 <= 1800 || ch6 >= 2200)
     {
         UserTask_ResetMission();
@@ -291,6 +294,13 @@ void UserTask_OneKeyCmd(void)
 
     if (mission_step == 0)
     {
+        if (car_takeoff_flag == RESET ||
+            car_takeoff_start_armed == 0U)
+        {
+            return;
+        }
+
+        car_takeoff_start_armed = 0U;
         UserTask_ResetMission();
         DrvDropMagnetSet(1U);
         mission_step = 1;
