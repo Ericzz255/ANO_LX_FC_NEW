@@ -2,6 +2,12 @@
 #include "Drv_Sys.h"
 #include <string.h>
 
+/*
+ * 小车单片机无线透传协议：
+ * AA 55 | X_MM(s32 LE) | Y_MM(s32 LE) | CRC16 LE | 0D 0A
+ * CRC-16/CCITT-FALSE覆盖X/Y八个数据字节。
+ */
+
 #define CAR_POSE_XY_SOF0                 0xAAU
 #define CAR_POSE_XY_SOF1                 0x55U
 #define CAR_POSE_XY_EOF0                 0x0DU

@@ -5,11 +5,11 @@
  * Anonymous ground-station V7 F1 diagnostics:
  *  1 int16 current X, centimetres
  *  2 int16 current Y, centimetres
- *  3 int16 fresh car pose eligible for control (0=no, 1=yes)
+ *  3 int16 current blind-flight mission step
  *  4 int16 SLAM position initialized and fresh flag (0=no, 1=yes)
- *  5 int16 UART1 car-pose link alive flag (0=no, 1=yes)
- *  6 int16 current valid vehicle X, millimetres (0 while invalid)
- *  7 int16 current valid vehicle Y, millimetres (0 while invalid)
+ *  5 int16 current blind-flight waypoint index (0..14)
+ *  6 int16 current horizontal target X, centimetres
+ *  7 int16 current horizontal target Y, centimetres
  */
 void UserDataTransfer_Task(void);
 

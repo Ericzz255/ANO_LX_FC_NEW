@@ -3,6 +3,8 @@
 
 #include "SysConfig.h"
 
+/* 小车单片机 -> 无线透传 -> 飞控USART1，固定14字节X/Y毫米坐标帧。 */
+
 #define CAR_POSE_XY_FRAME_SIZE       14U
 #define CAR_POSE_XY_VALID_TIMEOUT_MS 150U
 #define CAR_POSE_XY_LINK_TIMEOUT_MS  300U

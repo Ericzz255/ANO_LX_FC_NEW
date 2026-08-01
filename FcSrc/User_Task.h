@@ -5,5 +5,6 @@
 
 void UserTask_OneKeyCmd(void);
 u8 UserTask_GetMissionStep(void);
+u8 UserTask_GetBlindWaypointIndex(void);
 
 #endif
