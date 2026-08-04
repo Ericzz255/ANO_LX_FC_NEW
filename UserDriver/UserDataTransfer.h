@@ -10,6 +10,7 @@
  *  5 int16 current blind-flight waypoint index (0..7)
  *  6 int16 current horizontal target X, centimetres
  *  7 int16 current horizontal target Y, centimetres
+ *  8 int16 vehicle takeoff flag (0=no request, 1=start request)
  */
 void UserDataTransfer_Task(void);
 

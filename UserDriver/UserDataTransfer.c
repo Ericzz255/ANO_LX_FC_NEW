@@ -3,6 +3,7 @@
 #include "Drv_Uart.h"
 #include "HorizontalControl.h"
 #include "User_Task.h"
+#include "CarPoseXyUart.h"
 
 #define USER_DATA_DEST_ADDR   HW_ALL
 #define USER_DATA_BUFFER_SIZE 32U
@@ -31,6 +32,9 @@ static void UserDataTransfer_FillPayloadF1(u8 *buffer, u8 *cnt)
     /* USERDATA6..7: current horizontal target, centimetres. */
     UserData_PutS16(buffer, cnt, HorizontalControl_GetTargetX());
     UserData_PutS16(buffer, cnt, HorizontalControl_GetTargetY());
+    /* USERDATA8: current vehicle takeoff flag. */
+    UserData_PutS16(buffer, cnt,
+                    CarPoseXyUart_GetTakeoffFlag() ? 1 : 0);
 }
 
 static void UserDataTransfer_SendFrame(u8 frame_id,

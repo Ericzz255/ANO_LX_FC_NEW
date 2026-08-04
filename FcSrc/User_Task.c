@@ -8,7 +8,7 @@
 #include "Drv_PwmOut.h"
 #include "CarPoseXyUart.h"
 
-#define MISSION_HEIGHT_CM               75U
+#define MISSION_HEIGHT_CM              100U
 #define TAKEOFF_STABILIZE_MS            3000U
 #define USER_TASK_PERIOD_MS             20U
 #define HEIGHT_TOLERANCE_CM             5.0f
@@ -65,7 +65,7 @@ static const blind_waypoint_t blind_waypoints[] =
  * 2 wait for RC unlock
  * 3 wait after unlock
  * 4 take off to the contest cruise height
- * 5 hold at 75 cm for three continuous seconds
+ * 5 hold at 100 cm for three continuous seconds
  * 6 fly directly to B, follow the upper turn through C, and finish at D
  * 7 release the payload, return to absolute (0, 0), and hold three seconds
  * 8 land

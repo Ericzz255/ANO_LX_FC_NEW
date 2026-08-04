@@ -6,9 +6,9 @@
 
 - USART3 接收外部定位坐标，并送入水平位置闭环。
 - 高度控制和水平定点控制。
-- USART2 以 500000 bit/s、20 Hz 向 Linux 地面站发送无人机位置、高度、电压、任务状态和小车 X/Y 坐标，并解析地面站上行帧、记录链路状态和错误计数。
+- USART2 以 500000 bit/s、20 Hz 单向发送无人机位置、高度、电压、任务状态和小车 X/Y 坐标至 Linux 地面站。
 - USART1 以 115200 bit/s 接收小车无线透传帧：兼容V2.0的14字节X/Y帧，并支持V2.1的15字节X/Y/起飞标志帧；起飞标志只负责启动任务，不参与位置控制。
-- 匿名上位机用户数据诊断：`USERDATA1/2`为无人机X/Y，`USERDATA3`为任务步骤，`USERDATA4`为SLAM有效标志，`USERDATA5`为航点编号，`USERDATA6/7`为当前水平目标X/Y。
+- 匿名上位机用户数据诊断：`USERDATA1/2`为无人机X/Y，`USERDATA3`为任务步骤，`USERDATA4`为SLAM有效标志，`USERDATA5`为航点编号，`USERDATA6/7`为当前水平目标X/Y，`USERDATA8`为小车起飞标志。
 - IOA3/PB0 电磁铁 MOSFET 输出，用于软质物体抛投。
 - 一键起飞、降落和飞控状态接口。
 
@@ -18,9 +18,9 @@
 
 1. 等待小车起飞标志和无人机SLAM有效，记录无人机起飞原点并进入程控模式。
 2. 等待遥控器解锁，解锁后延时2秒。
-3. 起飞至75 cm，进入高度容差后稳定悬停3秒。
+3. 起飞至100 cm，进入高度容差后稳定悬停3秒。
 4. 直接飞向B，按固定航点经过上半圆和C到达D；各航点到达范围为X/Y各±13 cm。
-5. 到达D后立即释放电磁铁，保持75 cm返回绝对坐标`(0,0)`。
+5. 到达D后立即释放电磁铁，保持100 cm返回绝对坐标`(0,0)`。
 6. 在返航点X/Y各±5 cm内连续稳定3秒后降落。
 
 小车X/Y仍会解析并上传Linux地面站，但不参与任务控制。小车雷达失效时可在V2.1帧中发送无效X/Y哨兵值，同时发送有效起飞标志。CH6中位和低位仍用于定高定点悬停；失控保护、无人机SLAM超时、航点超时和场地越界都会终止任务并进入降落。
@@ -44,7 +44,6 @@
 | `FcSrc/Highconrtroll.c` | 高度闭环 |
 | `UserDriver/Usart3_Pi.c` | 外部定位数据接收 |
 | `UserDriver/LinuxTelemetry.c` | 地面站无人机遥测 |
-| `UserDriver/GroundStationRx.c` | 地面站上行帧解析与链路诊断 |
 | `UserDriver/CarPoseXyUart.c` | USART1 小车X/Y 14字节帧解析、CRC、无效哨兵和超时保护 |
 | `UserDriver/CAR_POSE_XY_UART_PROTOCOL_V2.0.md` | 树莓派与飞控共同使用的V2.0纯X/Y协议基线 |
 | `DriversMcu/STM32F407/Drivers/Drv_Uart.c` | USART1 硬件接收与字节缓存入口 |

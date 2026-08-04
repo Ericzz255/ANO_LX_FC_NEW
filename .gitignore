@@ -1,4 +1,4 @@
-# Keil MDK 编译生成的文件
+# Keil MDK build outputs
 *.axf
 *.bin
 *.hex
@@ -16,14 +16,15 @@
 *.htm
 *.log
 
-# Keil 本地用户配置文件
+# Keil local/user configuration
 *.uvoptx
 *.uvguix.*
 JLinkSettings.ini
 JLinkLog.txt
 
-# 编译生成的文件夹
+# Generated build directories
 build/
+build_*/
 DebugConfig/
 RTE/
 Listings/
@@ -33,17 +34,23 @@ Objects/
 *.dep/
 *.build/
 
-# 系统/工具文件
+# Editors and operating systems
 Desktop.ini
 .DS_Store
 .vscode/
 .idea/
 .claude/
 
-# 无关文件
-*.pdf
-*.txt
+# One-off report-generation workspace
+_report_work/
+
+# Local reference material and competition deliverables
+/Doc/
+/DriversMcu/STM32F407/Libraries/
+/近5年电赛无人机题_2021-2025/
+/匿名--凌霄--飞控手册.V1.07pdf.pdf
+/华南农业大学*.docx
+/华南农业大学*.pdf
+
+# Local helper scripts
 clear编译完的东西.bat
-
-DriversMcu/STM32F407/Libraries
-

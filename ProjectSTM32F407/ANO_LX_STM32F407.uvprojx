@@ -485,6 +485,16 @@
               <FileType>5</FileType>
               <FilePath>..\FcSrc\HorizontalControl.h</FilePath>
             </File>
+            <File>
+              <FileName>PositionFusion.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\FcSrc\PositionFusion.c</FilePath>
+            </File>
+            <File>
+              <FileName>PositionFusion.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\FcSrc\PositionFusion.h</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>
@@ -734,16 +744,6 @@
               <FileName>LinuxTelemetry.h</FileName>
               <FileType>5</FileType>
               <FilePath>..\UserDriver\LinuxTelemetry.h</FilePath>
-            </File>
-            <File>
-              <FileName>GroundStationRx.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\UserDriver\GroundStationRx.c</FilePath>
-            </File>
-            <File>
-              <FileName>GroundStationRx.h</FileName>
-              <FileType>5</FileType>
-              <FilePath>..\UserDriver\GroundStationRx.h</FilePath>
             </File>
             <File>
               <FileName>CarPoseXyUart.c</FileName>

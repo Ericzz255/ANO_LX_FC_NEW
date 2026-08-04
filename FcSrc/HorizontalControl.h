@@ -20,6 +20,9 @@ extern s16 now_y;
  */
 void HorizontalControl_SetPosition(s16 x_cm, s16 y_cm);
 
+/** Run the SLAM/optical-flow fusion prediction at the 50 Hz control rate. */
+void HorizontalControl_PositionFusionUpdate(void);
+
 u8 HorizontalControl_HasValidPosition(void);
 
 /**

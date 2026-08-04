@@ -3,6 +3,7 @@
 #include "Drv_Sys.h"
 #include "LX_FC_EXT_Sensor.h"
 #include "LX_FC_State.h"
+#include "PositionFusion.h"
 
 /*
  * 水平位置外环：SLAM位置误差(cm) -> 水平速度目标(cm/s)。
@@ -149,6 +150,7 @@ static void HorizontalControl_BeginSlamQualification(s16 x_cm,
     slam_candidate_last_y_cm = y_cm;
     slam_candidate_start_ms = now_ms;
     slam_candidate_last_ms = now_ms;
+    PositionFusion_Reset();
 }
 
 void HorizontalControl_SetPosition(s16 x_cm, s16 y_cm)
@@ -217,7 +219,22 @@ void HorizontalControl_SetPosition(s16 x_cm, s16 y_cm)
 
     slam_position_update_cnt++;
     slam_last_update_ms = now_ms;
+    PositionFusion_PushSlam(x_cm, y_cm);
+    (void)PositionFusion_GetPosition(&now_x, &now_y);
     LX_FC_EXT_Sensor_SetSlamPosition(x_cm, y_cm);
+}
+
+void HorizontalControl_PositionFusionUpdate(void)
+{
+    if (slam_position_valid == 0U ||
+        (u32)(GetSysRunTimeMs() - slam_last_update_ms) >
+        HORIZONTAL_HOLD_SENSOR_TIMEOUT_MS)
+    {
+        return;
+    }
+
+    PositionFusion_Update((float)HORIZONTAL_HOLD_PERIOD_MS * 0.001f);
+    (void)PositionFusion_GetPosition(&now_x, &now_y);
 }
 
 u8 HorizontalControl_HasValidPosition(void)

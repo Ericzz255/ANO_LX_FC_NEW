@@ -67,6 +67,7 @@ static void Loop_50Hz(void) //20ms执行一次
 				(s16)((pi_data[2] << 8) | pi_data[3]));
 		}
 	}
+	HorizontalControl_PositionFusionUpdate();
 
 	UserTask_OneKeyCmd();
 	CarPoseXyUart_Task();

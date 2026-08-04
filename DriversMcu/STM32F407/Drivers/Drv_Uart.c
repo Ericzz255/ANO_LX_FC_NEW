@@ -10,13 +10,11 @@
 #include "Drv_UbloxGPS.h"
 #include "Drv_AnoOf.h"
 #include "Usart3_Pi.h"
-#include "GroundStationRx.h"
 #include "CarPoseXyUart.h"
 
 void NoUse(u8 data){}
 //串口接收发送快速定义，直接修改此处的函数名称宏，修改成自己的串口解析和发送函数名称即可，注意函数参数格式需统一
 #define U1GetOneByte	CarPoseXyUart_GetOneByte
-#define U2GetOneByte	GroundStationRx_GetOneByte
 #define U3GetOneByte	Pi_DataAnl
 #define U4GetOneByte	AnoOF_GetOneByte
 #define U5GetOneByte	ANO_DT_LX_Data_Receive_Prepare	
@@ -169,7 +167,6 @@ void DrvUart2Init(u32 br_num)
     NVIC_Init(&NVIC_InitStructure);
 
     GPIO_PinAFConfig(GPIOD, GPIO_PinSource5, GPIO_AF_USART2);
-    GPIO_PinAFConfig(GPIOD, GPIO_PinSource6, GPIO_AF_USART2);
 
     //配置PD5作为USART2　Tx
     GPIO_InitStructure.GPIO_Pin = GPIO_Pin_5;
@@ -178,14 +175,6 @@ void DrvUart2Init(u32 br_num)
     GPIO_InitStructure.GPIO_OType = GPIO_OType_PP;
     GPIO_InitStructure.GPIO_PuPd = GPIO_PuPd_UP;
     GPIO_Init(GPIOD, &GPIO_InitStructure);
-    //配置PD6作为USART2　Rx
-    GPIO_InitStructure.GPIO_Pin = GPIO_Pin_6;
-    GPIO_InitStructure.GPIO_Mode = GPIO_Mode_AF;
-    GPIO_InitStructure.GPIO_Speed = GPIO_Speed_50MHz;
-    GPIO_InitStructure.GPIO_OType = GPIO_OType_OD;
-    GPIO_InitStructure.GPIO_PuPd = GPIO_PuPd_NOPULL;
-    GPIO_Init(GPIOD, &GPIO_InitStructure);
-
     //配置USART2
     //中断被屏蔽了
     USART_InitStructure.USART_BaudRate = br_num;                                    //波特率可以通过地面站配置
@@ -193,7 +182,7 @@ void DrvUart2Init(u32 br_num)
     USART_InitStructure.USART_StopBits = USART_StopBits_1;                          //在帧结尾传输1个停止位
     USART_InitStructure.USART_Parity = USART_Parity_No;                             //禁用奇偶校验
     USART_InitStructure.USART_HardwareFlowControl = USART_HardwareFlowControl_None; //硬件流控制失能
-    USART_InitStructure.USART_Mode = USART_Mode_Tx | USART_Mode_Rx;                 //发送、接收使能
+    USART_InitStructure.USART_Mode = USART_Mode_Tx;                                 //仅向 Linux 地面站发送遥测
     //配置USART2时钟
     USART_ClockInitStruct.USART_Clock = USART_Clock_Disable;     //时钟低电平活动
     USART_ClockInitStruct.USART_CPOL = USART_CPOL_Low;           //SLCK引脚上时钟输出的极性->低电平
@@ -203,8 +192,6 @@ void DrvUart2Init(u32 br_num)
     USART_Init(USART2, &USART_InitStructure);
     USART_ClockInit(USART2, &USART_ClockInitStruct);
 
-    //使能USART2接收中断
-    USART_ITConfig(USART2, USART_IT_RXNE, ENABLE);
     //使能USART2
     USART_Cmd(USART2, ENABLE);
 }
@@ -228,40 +215,8 @@ void DrvUart2SendBuf(unsigned char *DataToSend, u8 data_num)
 
     USART_ITConfig(USART2, USART_IT_TXE, ENABLE); //打开发送中断
 }
-u8 U2RxDataTmp[100];
-u8 U2RxInCnt = 0;
-u8 U2RxoutCnt = 0;
-void drvU2GetByte(u8 data)
-{
-	U2RxDataTmp[U2RxInCnt++] = data;
-	if(U2RxInCnt >= 100)
-		U2RxInCnt = 0;
-}
-void drvU2DataCheck(void)
-{
-	while(U2RxInCnt!=U2RxoutCnt)
-	{
-		U2GetOneByte(U2RxDataTmp[U2RxoutCnt++]);
-		if(U2RxoutCnt >= 100)
-			U2RxoutCnt = 0;
-	}
-}
 void Usart2_IRQ(void)
 {
-    u8 com_data;
-
-    if (USART2->SR & USART_SR_ORE) //ORE中断
-    {
-        com_data = USART2->DR;
-    }
-
-    //接收中断
-    if (USART_GetITStatus(USART2, USART_IT_RXNE))
-    {
-        USART_ClearITPendingBit(USART2, USART_IT_RXNE); //清除中断标志
-        com_data = USART2->DR;
-		drvU2GetByte(com_data);
-    }
     //发送（进入移位）中断
     if (USART_GetITStatus(USART2, USART_IT_TXE))
     {
@@ -684,7 +639,6 @@ void Uart5_IRQ(void)
 void DrvUartDataCheck(void)
 {
 	drvU1DataCheck();
-	drvU2DataCheck();
 	drvU3DataCheck();
 	drvU4DataCheck();
 	drvU5DataCheck();
